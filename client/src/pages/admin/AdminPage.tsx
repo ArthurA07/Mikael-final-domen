@@ -19,6 +19,9 @@ const AdminPage: React.FC = () => {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [adminEmail, setAdminEmail] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState('');
   const [resetPassword2, setResetPassword2] = useState('');
@@ -42,6 +45,17 @@ const AdminPage: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    // Получаем мой профиль, чтобы показать текущий email админа
+    (async () => {
+      try {
+        const res = await axios.get('/auth/me');
+        const email = res.data?.data?.user?.email || '';
+        setAdminEmail(email);
+      } catch {}
+    })();
+  }, []);
 
   const handleExport = async (userId: string) => {
     // Запрашиваем CSV с авторизацией и скачиваем как файл
@@ -97,6 +111,27 @@ const AdminPage: React.FC = () => {
   return (
     <Box sx={{ maxWidth: 1100, mx: 'auto', p: 2 }}>
       <Typography variant="h4" sx={{ mb: 2 }}>Админ-панель</Typography>
+      <Card sx={{ mb: 2 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ mb: 1 }}>Смена email администратора</Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+            <TextField label="Текущий email" value={adminEmail} size="small" InputProps={{ readOnly: true }} />
+            <TextField label="Новый email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} size="small" />
+            <Button variant="contained" onClick={async () => {
+              setEmailMsg(null);
+              try {
+                const res = await axios.post('/admin/change-email', { newEmail });
+                setAdminEmail(res.data?.data?.newEmail || newEmail);
+                setNewEmail('');
+                setEmailMsg('Email обновлён');
+              } catch (e: any) {
+                setEmailMsg(e?.response?.data?.error?.message || 'Ошибка смены email');
+              }
+            }}>Сохранить</Button>
+            {emailMsg && <Typography variant="body2" color="text.secondary">{emailMsg}</Typography>}
+          </Box>
+        </CardContent>
+      </Card>
       <Card>
         <CardContent>
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>

@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  mongo:
+    image: mongo:7
+    container_name: mikael_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./_data/mongo:/data/db
+    command: ["--bind_ip_all"]
+
+volumes:
+  mongo_data:
+

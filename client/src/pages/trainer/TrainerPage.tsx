@@ -32,11 +32,12 @@ import {
   Settings,
   Calculate,
   InfoOutlined,
+  CheckCircleRounded,
 } from '@mui/icons-material';
 import { useUser } from '../../contexts/UserContext';
 import { useAuth } from '../../contexts/AuthContext';
 import TrainerAbacus from '../../components/abacus/TrainerAbacus';
-import { LawsMode, generateProblemFactory } from '../../utils/problemGenerator';
+import { LawsMode, generateProblemFactory, Operation } from '../../utils/problemGenerator';
 import { Container, CircularProgress } from '@mui/material';
 
 // Типы данных
@@ -45,8 +46,11 @@ interface Problem {
   operation: '+' | '-' | '*' | '/';
   correctAnswer: number;
   userAnswer?: number;
+  userAnswerB?: number;
   timeSpent?: number;
+  timeSpentB?: number;
   isCorrect?: boolean;
+  isCorrectB?: boolean;
   ops?: ('+' | '-' | '*' | '/')[];
 }
 
@@ -83,9 +87,13 @@ interface TrainerState {
 const DEFAULT_SETTINGS = {
   numbersCount: 3,
   // Верхняя граница диапазона
-  numberRange: 10,
+  numberRange: 9,
   // Нижняя граница диапазона (для варианта 1000–1 000 000)
   numberRangeMin: 1,
+  // Режим двух экранов (локальная игра на двоих)
+  twoScreens: false,
+  // Показывать правильный ответ между примерами
+  showAnswer: false,
   operations: ['+'],
   displaySpeed: 2000,
   displayMode: 'digits' as 'digits' | 'abacus',
@@ -122,12 +130,17 @@ const TrainerPage: React.FC = () => {
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [guestAllowed, setGuestAllowed] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [guestUsed, setGuestUsed] = useState<number | null>(null);
 
   const [state, setState] = useState<TrainerState>({
     isTraining: false,
     currentSession: null,
     currentProblem: null,
     userAnswer: '',
+    // Ответ второго игрока (для режима двух экранов)
+    // Не включаем в TrainerState интерфейс для простоты — локальный ключ
+    // @ts-ignore
+    userAnswerB: '',
     showProblem: false,
     timeLeft: 0,
     problemStartTime: 0,
@@ -150,6 +163,7 @@ const TrainerPage: React.FC = () => {
         if (res.data?.success && res.data?.data?.allowed) {
           setGuestAllowed(true);
           setExpiresAt(res.data.data.expiresAt || null);
+          if (typeof res.data.data.exercisesUsed === 'number') setGuestUsed(res.data.data.exercisesUsed);
         } else {
           setGuestAllowed(false);
         }
@@ -238,8 +252,62 @@ const TrainerPage: React.FC = () => {
     
     const problems: Problem[] = [];
     const total = Math.max(1, Math.min(100, currentSettings.totalProblems ?? 10));
+
+    // План операций на сессию:
+    // - '+/-' считаем одной "группой" (для длинных цепочек имеет смысл смешивать + и - внутри выражения)
+    // - '*' и '/' — отдельные группы (и у них ограничение по количеству чисел до 3)
+    const selectedOps = (currentSettings.operations || ['+']) as Operation[];
+    const groups: Operation[][] = [];
+    const hasPlus = selectedOps.includes('+');
+    const hasMinus = selectedOps.includes('-');
+    if (hasPlus || hasMinus) groups.push(([...(hasPlus ? ['+'] : []), ...(hasMinus ? ['-'] : [])] as Operation[]));
+    if (selectedOps.includes('*')) groups.push(['*']);
+    if (selectedOps.includes('/')) groups.push(['/']);
+    if (!groups.length) groups.push(['+']);
+
+    const shuffle = <T,>(arr: T[]): T[] => {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+
+    const plan: Operation[][] = [];
+    const base = shuffle(groups);
+    const firstCount = Math.min(total, base.length);
+    for (let i = 0; i < firstCount; i++) plan.push(base[i]);
+    for (let i = firstCount; i < total; i++) {
+      plan.push(groups[Math.floor(Math.random() * groups.length)]);
+    }
+
+    // Фабрики под каждую группу операций (создаём один раз)
+    const keyOf = (ops: Operation[]) => ops.join('');
+    const factories = new Map<string, () => any>();
+    for (const g of groups) {
+      const key = keyOf(g);
+      if (!factories.has(key)) {
+        factories.set(key, generateProblemFactory({
+          numbersCount: currentSettings.numbersCount,
+          numberRange: currentSettings.numberRange,
+          numberRangeMin: (currentSettings as any).numberRangeMin ?? 1,
+          operations: g,
+          lawsMode: currentSettings.lawsMode as any,
+          multiplyDigits1: (currentSettings as any).multiplyDigits1,
+          multiplyDigits2: (currentSettings as any).multiplyDigits2,
+          multiplyDigits3: (currentSettings as any).multiplyDigits3,
+          divisionDividendDigits: (currentSettings as any).divisionDividendDigits,
+          divisionDivisorDigits: (currentSettings as any).divisionDivisorDigits,
+          divisionSecondDivisorDigits: (currentSettings as any).divisionSecondDivisorDigits,
+        }));
+      }
+    }
+
     for (let i = 0; i < total; i++) {
-      problems.push(generateProblem());
+      const g = plan[i];
+      const factory = factories.get(keyOf(g))!;
+      problems.push(factory() as Problem);
     }
     
     const session: TrainingSession = {
@@ -287,7 +355,7 @@ const TrainerPage: React.FC = () => {
       // Без предварительной паузы просто начинаем показ; дальнейший переход управляется эффектом показа
     }
     
-  }, [generateProblem, currentSettings.displaySpeed, clearCurrentTimeout]);
+  }, [generateProblem, currentSettings.displaySpeed, clearCurrentTimeout, currentSettings.totalProblems, currentSettings.operations, currentSettings.numbersCount, currentSettings.numberRange, (currentSettings as any).numberRangeMin, currentSettings.lawsMode, (currentSettings as any).multiplyDigits1, (currentSettings as any).multiplyDigits2, (currentSettings as any).multiplyDigits3, (currentSettings as any).divisionDividendDigits, (currentSettings as any).divisionDivisorDigits, (currentSettings as any).divisionSecondDivisorDigits, isAuthenticated, guestAllowed]);
 
   // Остановка тренировки
   const stopTraining = useCallback(() => {
@@ -306,29 +374,63 @@ const TrainerPage: React.FC = () => {
 
   // Отправка ответа
   const submitAnswer = useCallback(async () => {
-    if (!state.currentSession || !state.currentProblem) return;
-    if (submittingAnswerRef.current) return; // антидребезг на быстрые клики/таймер
-    submittingAnswerRef.current = true;
-    
-    clearCurrentTimeout();
-    
-    const userAnswer = parseInt(state.userAnswer);
-    const isCorrect = userAnswer === state.currentProblem.correctAnswer;
-    const timeSpent = Date.now() - state.problemStartTime;
-    
-    const updatedProblem = {
-      ...state.currentProblem,
-      userAnswer,
-      isCorrect,
-      timeSpent,
-    };
-    
-    const updatedProblems = [...state.currentSession.problems];
-    updatedProblems[state.currentSession.currentProblemIndex] = updatedProblem;
-    
-    const nextIndex = state.currentSession.currentProblemIndex + 1;
-    const isLastProblem = nextIndex >= updatedProblems.length;
-    
+    // Важно: submitAnswer вызывается из обработчиков событий и таймеров.
+    // Если промис упадёт наружу — CRA покажет красный runtime overlay.
+    // Поэтому обязательно ловим любые исключения внутри.
+    try {
+      if (!state.currentSession || !state.currentProblem) return;
+      if (submittingAnswerRef.current) return; // антидребезг на быстрые клики/таймер
+      submittingAnswerRef.current = true;
+      
+      clearCurrentTimeout();
+      
+      const userAnswer = parseInt(state.userAnswer);
+      const userAnswerB = parseInt(((state as any).userAnswerB || ''));
+      const isTwo = !!(currentSettings as any).twoScreens;
+      const isCorrect = userAnswer === state.currentProblem.correctAnswer;
+      const isCorrectB = isTwo ? (userAnswerB === state.currentProblem.correctAnswer) : undefined;
+      const timeSpent = Date.now() - state.problemStartTime;
+      const timeSpentB = isTwo ? timeSpent : undefined;
+      
+      const updatedProblem = {
+        ...state.currentProblem,
+        userAnswer,
+        ...(isTwo ? { userAnswerB } : {}),
+        isCorrect,
+        ...(isTwo ? { isCorrectB } : {}),
+        timeSpent,
+        ...(isTwo ? { timeSpentB } : {}),
+      };
+      
+      const updatedProblems = [...state.currentSession.problems];
+      updatedProblems[state.currentSession.currentProblemIndex] = updatedProblem;
+      
+      const nextIndex = state.currentSession.currentProblemIndex + 1;
+      const isLastProblem = nextIndex >= updatedProblems.length;
+      
+      // Для гостей учитываем лимит примеров на сервере
+      if (!isAuthenticated) {
+        try {
+          const res = await axios.post('/public/track-exercise');
+          if (res.data?.success && res.data?.data?.allowed === false) {
+            alert('Лимит бесплатных примеров исчерпан. Войдите или оформите доступ, чтобы продолжить.');
+            // Завершаем сессию немедленно
+            setState(prev => ({
+              ...prev,
+              isTraining: false,
+              currentSession: null,
+              currentProblem: null,
+              userAnswer: '',
+              showProblem: false,
+              currentStep: 'waiting',
+            }));
+            return;
+          }
+        } catch (e) {
+          // если сервер не доступен — не блокируем, но не падаем
+        }
+      }
+
     if (isLastProblem) {
       const correctAnswers = updatedProblems.filter(p => p.isCorrect).length;
       const accuracy = (correctAnswers / updatedProblems.length) * 100;
@@ -401,41 +503,122 @@ const TrainerPage: React.FC = () => {
           console.warn('Не удалось сохранить статистику:', error);
         }
       }
-      
-      setState(prev => ({
-        ...prev,
-        currentSession: completedSession,
-        currentStep: 'result',
-      }));
-      submittingAnswerRef.current = false;
+
+      // ВАЖНО: если включён показ ответа/пауза результата — показываем правильный ответ
+      // также и для ПОСЛЕДНЕГО примера, иначе пользователь его не увидит.
+      const wantShowAnswer = !!(currentSettings as any).showAnswer || ((currentSettings as any).resultPause || 0) > 0;
+      if (wantShowAnswer) {
+        // Если включили "Показывать ответы", но пауза результата = 0, делаем дефолтную паузу,
+        // иначе экран "Правильный ответ" мигает за 1мс и пользователь думает, что его нет.
+        const configuredPauseMs = Math.max(0, (((currentSettings as any).resultPause || 0) * 1000));
+        const pauseMs = configuredPauseMs > 0 ? configuredPauseMs : ((currentSettings as any).showAnswer ? 1500 : 0);
+        setState(prev => ({
+          ...prev,
+          currentSession: completedSession,
+          currentProblem: updatedProblem,
+          showProblem: false,
+          currentStep: 'result_pause',
+        }));
+
+        // После паузы переходим на экран итогов
+        clearCurrentTimeout();
+        problemTimeoutRef.current = setTimeout(() => {
+          setState(prev => ({
+            ...prev,
+            currentSession: completedSession,
+            currentStep: 'result',
+          }));
+        }, pauseMs || 1);
+      } else {
+        setState(prev => ({
+          ...prev,
+          currentSession: completedSession,
+          currentStep: 'result',
+        }));
+      }
+
     } else {
-      const nextProblem = updatedProblems[nextIndex];
-      
-      setState(prev => ({
-        ...prev,
-        currentSession: {
-          ...prev.currentSession!,
-          problems: updatedProblems,
-          currentProblemIndex: nextIndex,
-        },
-        currentProblem: nextProblem,
-        userAnswer: '',
-        showProblem: true,
-        currentStep: 'showing',
-        problemStartTime: Date.now(),
-        timeLeft: currentSettings.displaySpeed,
-        // критично: при новом примере в последовательном режиме всегда начинаем с первого шага
-        sequentialIndex: 0,
-      }));
-      // Не используем внешний таймер перехода: показом и переходом управляет эффект показа
+      // Если нужно показать ответ — делаем короткую паузу result_pause
+      const wantShowAnswer = !!(currentSettings as any).showAnswer || ((currentSettings as any).resultPause || 0) > 0;
+      if (wantShowAnswer) {
+        setState(prev => ({
+          ...prev,
+          currentSession: {
+            ...prev.currentSession!,
+            problems: updatedProblems,
+            currentProblemIndex: nextIndex - 1, // остаёмся на предыдущем для показа ответа
+          },
+          currentProblem: updatedProblem,
+          showProblem: false,
+          currentStep: 'result_pause',
+        }));
+        const configuredPauseMs = Math.max(0, (((currentSettings as any).resultPause || 0) * 1000));
+        const pauseMs = configuredPauseMs > 0 ? configuredPauseMs : ((currentSettings as any).showAnswer ? 1500 : 0);
+        setTimeout(() => {
+          const nextProblem = updatedProblems[nextIndex];
+          setState(prev => ({
+            ...prev,
+            currentSession: {
+              ...prev.currentSession!,
+              problems: updatedProblems,
+              currentProblemIndex: nextIndex,
+            },
+            currentProblem: nextProblem,
+            userAnswer: '',
+            // @ts-ignore
+            userAnswerB: '',
+            showProblem: true,
+            currentStep: 'showing',
+            problemStartTime: Date.now(),
+            timeLeft: currentSettings.displaySpeed,
+            sequentialIndex: 0,
+          }));
+        }, pauseMs || 1);
+      } else {
+        const nextProblem = updatedProblems[nextIndex];
+        setState(prev => ({
+          ...prev,
+          currentSession: {
+            ...prev.currentSession!,
+            problems: updatedProblems,
+            currentProblemIndex: nextIndex,
+          },
+          currentProblem: nextProblem,
+          userAnswer: '',
+          // @ts-ignore
+          userAnswerB: '',
+          showProblem: true,
+          currentStep: 'showing',
+          problemStartTime: Date.now(),
+          timeLeft: currentSettings.displaySpeed,
+          sequentialIndex: 0,
+        }));
+      }
+    }
+    } catch (err) {
+      // Не даём ошибке улететь наружу (иначе будет красный overlay).
+      console.error('Trainer submitAnswer runtime error:', err);
+    } finally {
       submittingAnswerRef.current = false;
     }
-  }, [state, currentSettings.displaySpeed, user, updateUserStats, addAchievement, isAuthenticated, clearCurrentTimeout]);
+  }, [state, currentSettings, user, updateUserStats, addAchievement, isAuthenticated, clearCurrentTimeout]);
 
   // Обновление настроек - стабилизированная функция
   const handleSettingsChange = useCallback(async (newSettings: Partial<typeof currentSettings>) => {
     // Обновляем локальное состояние сразу для отзывчивости UI
     const updatedSettings = { ...currentSettings, ...newSettings };
+    // Полировка: при включении законов удаляем * и /; при включении * или / ограничиваем numbersCount <= 3
+    if (newSettings.lawsMode && newSettings.lawsMode !== 'none') {
+      if (updatedSettings.operations.some(op => op === '*' || op === '/')) {
+        updatedSettings.operations = updatedSettings.operations.filter(op => op === '+' || op === '-');
+      }
+    }
+    if (newSettings.operations) {
+      const hasMulDiv = newSettings.operations.some(op => op === '*' || op === '/');
+      if (hasMulDiv && (updatedSettings.numbersCount || 0) > 3) {
+        updatedSettings.numbersCount = 3;
+      }
+    }
     setLocalSettings(updatedSettings);
     
     // Сохраняем настройки
@@ -446,7 +629,7 @@ const TrainerPage: React.FC = () => {
           'numbersCount', 'numberRange', 'operations', 'displaySpeed', 'displayMode',
           // новые ключи, сохраняемые на сервер
           'multiplyDigits1','multiplyDigits2','divisionDividendDigits','divisionDivisorDigits',
-          'preStartPause','answerPause','resultPause','fontScale','randomPosition','randomColor','sequentialDisplay',
+          'preStartPause','answerPause','resultPause','fontScale','randomPosition','randomColor','sequentialDisplay','twoScreens',
           'totalProblems'
         ];
         const payload: Partial<typeof currentSettings> = {};
@@ -541,6 +724,42 @@ const TrainerPage: React.FC = () => {
     if (!state.currentProblem) return null;
 
     const { numbers, operation } = state.currentProblem;
+
+    // Визуальные "рандомизации" (позиция/цвет) должны работать и в sequential режиме.
+    // Делаем детерминированно (по индексу примера и шага), чтобы не дёргалось на каждом ререндере.
+    const currentIdx = state.currentSession?.currentProblemIndex || 0;
+    const sequentialIdx = state.sequentialIndex || 0;
+    const randomPositionOn = !!(currentSettings as any).randomPosition;
+    const randomColorOn = !!(currentSettings as any).randomColor;
+    const fontScale = ((currentSettings as any).fontScale || 1) as number;
+
+    const safeColors = [
+      '#1E88E5', // blue
+      '#E53935', // red
+      '#8E24AA', // purple
+      '#43A047', // green
+      '#FB8C00', // orange
+      '#00ACC1', // cyan
+      '#3949AB', // indigo
+      '#6D4C41', // brown
+    ];
+
+    const rand01 = (seed: number) => {
+      const x = Math.sin(seed) * 10000;
+      return x - Math.floor(x);
+    };
+
+    const pickColor = (seed: number) => safeColors[Math.floor(rand01(seed) * safeColors.length) % safeColors.length];
+
+    const getOffset = (seed: number, mode: 'digits' | 'abacus') => {
+      const maxShiftX = isMobile ? 24 : 70;
+      const maxShiftY = isMobile ? 16 : 45;
+      const dx = Math.round((rand01(seed + 11) * 2 - 1) * maxShiftX);
+      let dy = Math.round((rand01(seed + 29) * 2 - 1) * maxShiftY);
+      // В режиме Абакуса не двигаем блок вверх, чтобы не наезжать на заголовок/подписи.
+      if (mode === 'abacus') dy = Math.max(0, dy);
+      return { dx, dy };
+    };
     
     return (
       <Box sx={{ 
@@ -563,10 +782,22 @@ const TrainerPage: React.FC = () => {
                   (() => {
                     const idx = state.sequentialIndex || 0;
                     const number = numbers[idx];
+                    const seed = currentIdx * 1000 + idx * 37 + numbers.length * 13;
+                    const { dx, dy } = randomPositionOn ? getOffset(seed, 'abacus') : { dx: 0, dy: 0 };
+                    const opColor = randomColorOn ? pickColor(seed + 3) : theme.palette.primary.main;
                     return (
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                      <Box
+                        sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 2,
+                          transform: randomPositionOn ? `translate(${dx}px, ${dy}px)` : undefined,
+                          transformOrigin: 'center',
+                        }}
+                      >
                         {idx === 0 ? null : (
-                          <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: theme.palette.primary.main, userSelect: 'none' }}>
+                          <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: opColor, userSelect: 'none' }}>
                             {state.currentProblem?.ops && state.currentProblem.ops[idx-1] ? state.currentProblem.ops[idx-1] : operation}
                           </Typography>
                         )}
@@ -582,13 +813,34 @@ const TrainerPage: React.FC = () => {
                   <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 2, maxWidth: '1000px', mx: 'auto' }}>
                     {numbers.map((number, index) => (
                       <React.Fragment key={index}>
-                        <Box sx={{ flex: '0 1 280px', minWidth: '200px' }}>
+                        {(() => {
+                          const seed = currentIdx * 1000 + index * 41 + numbers.length * 17;
+                          const { dx, dy } = randomPositionOn ? getOffset(seed, 'abacus') : { dx: 0, dy: 0 };
+                          return (
+                            <Box
+                              sx={{
+                                flex: '0 1 280px',
+                                minWidth: '200px',
+                                transform: randomPositionOn ? `translate(${dx}px, ${dy}px)` : undefined,
+                                transformOrigin: 'center',
+                              }}
+                            >
                           <Typography variant="body1" sx={{ textAlign: 'center', mb: 1, fontWeight: 'bold' }}>Число {index + 1}</Typography>
                           <TrainerAbacus value={number} showValue={false} />
-                        </Box>
+                            </Box>
+                          );
+                        })()}
                         {index < numbers.length - 1 && (
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', px: 2 }}>
-                            <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: theme.palette.primary.main, textShadow: '2px 2px 4px rgba(0,0,0,0.3)', userSelect: 'none' }}>{operation}</Typography>
+                            {(() => {
+                              const seed = currentIdx * 1000 + index * 41 + numbers.length * 17 + 7;
+                              const opColor = randomColorOn ? pickColor(seed) : theme.palette.primary.main;
+                              return (
+                                <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: opColor, textShadow: '2px 2px 4px rgba(0,0,0,0.3)', userSelect: 'none' }}>
+                              {state.currentProblem?.ops && state.currentProblem.ops[index] ? state.currentProblem.ops[index] : operation}
+                                </Typography>
+                              );
+                            })()}
                           </Box>
                         )}
                       </React.Fragment>
@@ -596,13 +848,16 @@ const TrainerPage: React.FC = () => {
                   </Box>
                 ))}
                 <Typography variant="body1" sx={{ mt: 3, textAlign: 'center', fontWeight: 'bold', color: theme.palette.primary.main }}>
-                  {state.currentProblem?.ops && state.currentProblem.ops.length > 0 ? 'Операции: + / -' : `Операция: ${operation}`}
+                  {state.currentProblem?.ops && state.currentProblem.ops.length > 0
+                    ? `Операции: ${state.currentProblem.ops.join(' ')}`
+                    : `Операция: ${operation}`}
                 </Typography>
               </Box>
             ) : (
               <Box sx={{ mb: 3 }}>
                 {(() => {
                   const sequential = !!(currentSettings as any).sequentialDisplay;
+                  const dynScale = Math.max(0.6, Math.min(1, 8 / Math.max(1, numbers.length)));
                   if (sequential) {
                     const idx = state.sequentialIndex || 0;
                     const num = numbers[idx];
@@ -611,16 +866,18 @@ const TrainerPage: React.FC = () => {
                       const opFromSeq = state.currentProblem?.ops?.[idx - 1];
                       return `${opFromSeq || operation} ${num}`;
                     })();
+                    const seed = currentIdx * 1000 + idx * 37 + numbers.length * 13;
+                    const { dx, dy } = randomPositionOn ? getOffset(seed, 'digits') : { dx: 0, dy: 0 };
+                    const color = randomColorOn ? pickColor(seed) : theme.palette.primary.main;
+                    const translate = randomPositionOn ? ` translate(${dx}px, ${dy}px)` : '';
                     return (
                       <Typography
                         key={idx}
                         variant="h2"
                         sx={{
                           fontWeight: 'bold',
-                          color: (currentSettings as any).randomColor ? `hsl(${(idx * 73) % 360} 80% 50%)` : theme.palette.primary.main,
-                          position: (currentSettings as any).randomPosition ? 'relative' : 'static',
-                          left: (currentSettings as any).randomPosition ? `${(idx % 3 - 1) * 10}px` : undefined,
-                          transform: `scale(${(currentSettings as any).fontScale || 1})`,
+                          color,
+                          transform: `scale(${fontScale * dynScale})${translate}`,
                         }}
                       >
                         {text}
@@ -628,15 +885,17 @@ const TrainerPage: React.FC = () => {
                     );
                   }
                   // обычный режим — вся строка
+                  const seed = currentIdx * 1000 + numbers.length * 19;
+                  const { dx, dy } = randomPositionOn ? getOffset(seed, 'digits') : { dx: 0, dy: 0 };
+                  const color = randomColorOn ? pickColor(seed) : theme.palette.primary.main;
+                  const translate = randomPositionOn ? ` translate(${dx}px, ${dy}px)` : '';
                   return (
                     <Typography
                       variant="h2"
                       sx={{
                         fontWeight: 'bold',
-                        color: (currentSettings as any).randomColor ? `hsl(${((state.currentSession?.currentProblemIndex || 0) * 53) % 360} 80% 50%)` : theme.palette.primary.main,
-                        position: (currentSettings as any).randomPosition ? 'relative' : 'static',
-                        left: (currentSettings as any).randomPosition ? `${(((state.currentSession?.currentProblemIndex || 0) % 3) - 1) * 10}px` : undefined,
-                        transform: `scale(${(currentSettings as any).fontScale || 1})`,
+                        color,
+                        transform: `scale(${fontScale * dynScale})${translate}`,
                       }}
                     >
                       {(() => {
@@ -665,33 +924,58 @@ const TrainerPage: React.FC = () => {
             <Typography variant="h4" sx={{ mb: 3, color: theme.palette.text.secondary }}>
               Сколько получилось?
             </Typography>
-            
-            <TextField
-              value={state.userAnswer}
-              onChange={(e) => setState(prev => ({ ...prev, userAnswer: e.target.value }))}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  submitAnswer();
-                }
-              }}
-              placeholder="Введите ответ"
-              variant="outlined"
-              sx={{ 
-                width: '200px',
-                '& .MuiOutlinedInput-root': {
-                  fontSize: '1.5rem',
-                  textAlign: 'center',
-                }
-              }}
-              autoFocus
-            />
-            
+            {((currentSettings as any).twoScreens) ? (
+              <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" justifyContent="center">
+                <Box>
+                  <Typography variant="subtitle2" sx={{ textAlign: 'center', mb: 1 }}>Игрок A</Typography>
+                  <TextField
+                    value={state.userAnswer}
+                    onChange={(e) => setState(prev => ({ ...prev, userAnswer: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitAnswer(); }}
+                    placeholder="Ответ A"
+                    variant="outlined"
+                    sx={{ 
+                      width: '200px',
+                      '& .MuiOutlinedInput-root': { fontSize: '1.5rem', textAlign: 'center' }
+                    }}
+                    autoFocus
+                  />
+                </Box>
+                <Box>
+                  <Typography variant="subtitle2" sx={{ textAlign: 'center', mb: 1 }}>Игрок B</Typography>
+                  <TextField
+                    value={(state as any).userAnswerB}
+                    onChange={(e) => setState(prev => ({ ...prev, userAnswerB: e.target.value } as any))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitAnswer(); }}
+                    placeholder="Ответ B"
+                    variant="outlined"
+                    sx={{ 
+                      width: '200px',
+                      '& .MuiOutlinedInput-root': { fontSize: '1.5rem', textAlign: 'center' }
+                    }}
+                  />
+                </Box>
+              </Stack>
+            ) : (
+              <TextField
+                value={state.userAnswer}
+                onChange={(e) => setState(prev => ({ ...prev, userAnswer: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitAnswer(); }}
+                placeholder="Введите ответ"
+                variant="outlined"
+                sx={{ 
+                  width: '200px',
+                  '& .MuiOutlinedInput-root': { fontSize: '1.5rem', textAlign: 'center' }
+                }}
+                autoFocus
+              />
+            )}
             <Box sx={{ mt: 3 }}>
               <Button
                 variant="contained"
                 size="large"
                 onClick={submitAnswer}
-                disabled={!state.userAnswer}
+                disabled={((currentSettings as any).twoScreens ? (!state.userAnswer || !(state as any).userAnswerB) : !state.userAnswer)}
               >
                 Ответить
               </Button>
@@ -708,6 +992,11 @@ const TrainerPage: React.FC = () => {
     
     const { accuracy, averageTime, score, problems } = state.currentSession;
     const correctCount = problems.filter(p => p.isCorrect).length;
+    // Персональные счётчики для A/B (если включён режим двух экранов)
+    const two = !!(currentSettings as any).twoScreens;
+    const correctA = problems.filter(p => p.isCorrect === true).length;
+    const correctB = two ? problems.filter(p => (p as any).isCorrectB === true).length : 0;
+    const total = problems.length;
     
     return (
       <Box sx={{ textAlign: 'center' }}>
@@ -726,6 +1015,30 @@ const TrainerPage: React.FC = () => {
               </Typography>
             </CardContent>
           </Card>
+          {two && (
+            <>
+              <Card sx={{ minWidth: 120 }}>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h6" color="primary">
+                    A: {correctA}/{total}
+                  </Typography>
+                  <Typography variant="body2">
+                    Игрок A
+                  </Typography>
+                </CardContent>
+              </Card>
+              <Card sx={{ minWidth: 120 }}>
+                <CardContent sx={{ textAlign: 'center' }}>
+                  <Typography variant="h6" color="primary">
+                    B: {correctB}/{total}
+                  </Typography>
+                  <Typography variant="body2">
+                    Игрок B
+                  </Typography>
+                </CardContent>
+              </Card>
+            </>
+          )}
           
           <Card sx={{ minWidth: 120 }}>
             <CardContent sx={{ textAlign: 'center' }}>
@@ -785,8 +1098,16 @@ const TrainerPage: React.FC = () => {
               sx={{ ml: 2 }}
               onClick={() => {
                 const wrong = problems.filter(p => p.isCorrect === false);
+                // Важно: сохраняем ops (последовательность + / -), иначе при повторе
+                // примеры со смешанными операциями отображаются как простая сумма
+                // и пользователь видит другую задачу, чем правильный ответ.
                 const session: TrainingSession = {
-                  problems: wrong.map(p => ({ numbers: p.numbers, operation: p.operation, correctAnswer: p.correctAnswer } as any)),
+                  problems: wrong.map(p => ({
+                    numbers: p.numbers,
+                    operation: p.operation,
+                    correctAnswer: p.correctAnswer,
+                    ...(p as any).ops ? { ops: (p as any).ops } : {},
+                  }) as any),
                   currentProblemIndex: 0,
                   startTime: Date.now(),
                   accuracy: 0,
@@ -953,11 +1274,31 @@ const TrainerPage: React.FC = () => {
               sx={{ mt: 2 }}
             />
           </FormControl>
+
+          {/* Третий знак для * и / (управление арностью для умножения/деления) */}
+          {currentSettings.operations.length > 0 && currentSettings.operations.every(op => (op === '*' || op === '/')) && (
+            <FormControl fullWidth>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <FormLabel>Третий знак для × и ÷</FormLabel>
+                <Tooltip title="Если выключено — примеры на ×/÷ генерируются только с двумя числами. Если включено — с тремя."><InfoOutlined fontSize="small" sx={{ color: 'text.secondary' }} /></Tooltip>
+              </Box>
+              <Select
+                value={currentSettings.numbersCount >= 3 ? 'yes' : 'no'}
+                onChange={(e) => {
+                  const wantThree = e.target.value === 'yes';
+                  handleSettingsChange({ numbersCount: wantThree ? 3 : 2 });
+                }}
+              >
+                <MenuItem value="no">Нет, только 2 числа</MenuItem>
+                <MenuItem value="yes">Да, 3 числа</MenuItem>
+              </Select>
+            </FormControl>
+          )}
           
           <FormControl fullWidth>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <FormLabel>Диапазон чисел</FormLabel>
-              <Tooltip title="Максимум и минимум для генерируемых чисел. Для 1000–1 000 000 используется нижняя граница 1000."><InfoOutlined fontSize="small" sx={{ color: 'text.secondary' }} /></Tooltip>
+              <Tooltip title="Максимум и минимум для генерируемых чисел."><InfoOutlined fontSize="small" sx={{ color: 'text.secondary' }} /></Tooltip>
             </Box>
             <Select
               value={`${currentSettings.numberRange}:${currentSettings.numberRangeMin}`}
@@ -966,10 +1307,10 @@ const TrainerPage: React.FC = () => {
                 handleSettingsChange({ numberRange: parseInt(maxStr, 10), numberRangeMin: parseInt(minStr, 10) });
               }}
             >
-              <MenuItem value={`10:1`}>1-10</MenuItem>
-              <MenuItem value={`100:1`}>1-100</MenuItem>
-              <MenuItem value={`1000:1`}>1-1000</MenuItem>
-              <MenuItem value={`1000000:1000`}>1000-1,000,000</MenuItem>
+              <MenuItem value={`9:1`}>1-9</MenuItem>
+              <MenuItem value={`99:1`}>1-99</MenuItem>
+              <MenuItem value={`999:1`}>1-999</MenuItem>
+              <MenuItem value={`999999:1`}>1-999999</MenuItem>
             </Select>
           </FormControl>
           
@@ -988,6 +1329,9 @@ const TrainerPage: React.FC = () => {
               <MenuItem value="ten">Законы на 10</MenuItem>
               <MenuItem value="both">Законы на 5 и 10</MenuItem>
             </Select>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+              При законах операции × и ÷ недоступны, примеры генерируются со смешением +/−. Для «на 10» чаще используются десятки/сотни.
+            </Typography>
           </FormControl>
 
           <FormControl fullWidth>
@@ -1046,6 +1390,21 @@ const TrainerPage: React.FC = () => {
             />
           </FormControl>
 
+          {/* Показывать ответы */}
+          <FormControl fullWidth>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <FormLabel>Показывать ответы</FormLabel>
+              <Tooltip title="Показывать правильный ответ между примерами, затем автоматически переходить дальше."><InfoOutlined fontSize="small" sx={{ color: 'text.secondary' }} /></Tooltip>
+            </Box>
+            <Select
+              value={(currentSettings as any).showAnswer ? 'yes' : 'no'}
+              onChange={(e) => handleSettingsChange({ showAnswer: e.target.value === 'yes' } as any)}
+            >
+              <MenuItem value="no">Нет</MenuItem>
+              <MenuItem value="yes">Да</MenuItem>
+            </Select>
+          </FormControl>
+
             <FormControl fullWidth>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <FormLabel>Время для ответа: {(currentSettings as any).answerPause}s</FormLabel>
@@ -1084,31 +1443,75 @@ const TrainerPage: React.FC = () => {
           
           <Box>
             <FormLabel>Операции:</FormLabel>
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
               {['+', '-', '*', '/'].map((op) => {
                 const lawsOn = (currentSettings as any).lawsMode && (currentSettings as any).lawsMode !== 'none';
                 const disabled = lawsOn && (op === '*' || op === '/');
+                const selected = currentSettings.operations.includes(op);
                 return (
                   <Chip
                     key={op}
                     label={op}
                     color={disabled ? 'default' : undefined}
-                    variant={currentSettings.operations.includes(op) ? 'filled' : 'outlined'}
+                    icon={selected ? <CheckCircleRounded /> : undefined}
+                    variant={selected ? 'filled' : 'outlined'}
                     onClick={() => {
                       if (disabled) return; // блокируем выбор при включённых законах
-                      const newOps = currentSettings.operations.includes(op)
+                      const newOps = selected
                         ? currentSettings.operations.filter((o: string) => o !== op)
                         : [...currentSettings.operations, op];
                       if (newOps.length > 0) {
                         handleSettingsChange({ operations: newOps });
                       }
                     }}
-                    sx={disabled ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+                    sx={{
+                      // Делаем выбор очевидным: крупнее, контрастнее, с галочкой и чётким бордером
+                      height: 44,
+                      minWidth: 54,
+                      px: 1.5,
+                      fontSize: '1.1rem',
+                      fontWeight: 800,
+                      borderRadius: 999,
+                      transition: 'transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease, border-color 120ms ease',
+                      ...(disabled ? { opacity: 0.4, pointerEvents: 'none' } : {}),
+                      ...(selected ? {
+                        bgcolor: 'primary.main',
+                        color: '#fff',
+                        border: '2px solid',
+                        borderColor: 'primary.dark',
+                        boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                        transform: 'translateY(-1px)',
+                        '& .MuiChip-icon': { color: '#fff', ml: 0.5 },
+                      } : {
+                        bgcolor: 'transparent',
+                        border: '2px solid',
+                        borderColor: 'rgba(0,0,0,0.28)',
+                        '&:hover': {
+                          borderColor: 'primary.main',
+                          bgcolor: 'rgba(25, 118, 210, 0.06)',
+                        },
+                      }),
+                    }}
                   />
                 );
               })}
             </Stack>
           </Box>
+
+          {/* Два экрана (локально вдвоём) */}
+          <FormControl fullWidth>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2 }}>
+              <FormLabel>Режим «Два экрана»</FormLabel>
+              <Tooltip title="Два независимых поля ответа на одном устройстве (соревновательный режим)."><InfoOutlined fontSize="small" sx={{ color: 'text.secondary' }} /></Tooltip>
+            </Box>
+            <Select
+              value={(currentSettings as any).twoScreens ? 'yes' : 'no'}
+              onChange={(e) => handleSettingsChange({ twoScreens: e.target.value === 'yes' } as any)}
+            >
+              <MenuItem value="no">Нет</MenuItem>
+              <MenuItem value="yes">Да</MenuItem>
+            </Select>
+          </FormControl>
           
           {/* Визуальные опции */}
           <Box>
@@ -1226,6 +1629,11 @@ const TrainerPage: React.FC = () => {
         <Typography variant="h6" color="text.secondary">
           Тренируйте ментальную арифметику с визуализацией абакуса
         </Typography>
+        {!isAuthenticated && guestAllowed && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Гостевой доступ активен{expiresAt ? ` до ${new Date(expiresAt).toLocaleTimeString()}` : ''}{guestUsed !== null ? ` · Использовано: ${guestUsed}` : ''}
+          </Typography>
+        )}
       </Box>
 
       {/* Основной контент */}
@@ -1363,7 +1771,28 @@ const TrainerPage: React.FC = () => {
               </Box>
             )}
             {state.currentStep !== 'prestart' && (
-              <>{state.currentStep === 'result' ? renderResults() : renderCurrentProblem()}</>
+              <>
+                {state.currentStep === 'result' ? (
+                  renderResults()
+                ) : state.currentStep === 'result_pause' ? (
+                  <Box sx={{ textAlign: 'center', py: 6 }}>
+                    <Typography variant="h4" sx={{ mb: 2, color: theme.palette.info.main }}>
+                      Правильный ответ: {state.currentProblem?.correctAnswer}
+                    </Typography>
+                    {(currentSettings as any).twoScreens && (
+                      <Stack direction="row" spacing={2} justifyContent="center">
+                        <Chip label={`A: ${state.currentProblem?.userAnswer} ${state.currentProblem?.isCorrect ? '✅' : '❌'}`} color={state.currentProblem?.isCorrect ? 'success' : 'error'} />
+                        <Chip label={`B: ${(state.currentProblem as any)?.userAnswerB ?? ''} ${((state.currentProblem as any)?.isCorrectB ? '✅' : '❌')}`} color={((state.currentProblem as any)?.isCorrectB ? 'success' : 'error')} />
+                      </Stack>
+                    )}
+                    {!(currentSettings as any).twoScreens && (
+                      <Chip label={`${state.currentProblem?.isCorrect ? 'Правильно' : 'Неправильно'}`} color={state.currentProblem?.isCorrect ? 'success' : 'error'} sx={{ mt: 2 }} />
+                    )}
+                  </Box>
+                ) : (
+                  renderCurrentProblem()
+                )}
+              </>
             )}
           </Paper>
         </Box>

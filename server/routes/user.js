@@ -35,12 +35,12 @@ router.get('/trainer-settings', async (req, res) => {
 router.put('/trainer-settings', [
   body('numbersCount')
     .optional()
-    .isInt({ min: 1, max: 10 })
-    .withMessage('Количество чисел должно быть от 1 до 10'),
+    .isInt({ min: 1, max: 15 })
+    .withMessage('Количество чисел должно быть от 1 до 15'),
   body('numberRange')
     .optional()
-    .isIn([1, 10, 100, 1000, 10000])
-    .withMessage('Неверный диапазон чисел'),
+    .isIn([9, 99, 999, 999999, 1000000])
+    .withMessage('Неверный диапазон чисел (используйте 9,99,999,999999,1000000)'),
   body('operations')
     .optional()
     .isArray()
@@ -72,6 +72,14 @@ router.put('/trainer-settings', [
     .optional()
     .isBoolean()
     .withMessage('showAnswer должен быть булевым значением'),
+  body('twoScreens')
+    .optional()
+    .isBoolean()
+    .withMessage('twoScreens должен быть булевым значением'),
+  body('lawsMode')
+    .optional()
+    .isIn(['none','five','ten','both'])
+    .withMessage('Неверное значение lawsMode'),
   body('progressiveMode')
     .optional()
     .isBoolean()
@@ -90,10 +98,13 @@ router.put('/trainer-settings', [
     .withMessage('randomFont должен быть булевым значением')
   ,
   // Новые поля
-  body('multiplyDigits1').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 6)),
-  body('multiplyDigits2').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 6)),
-  body('divisionDividendDigits').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 9)),
-  body('divisionDivisorDigits').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 6)),
+  // Ограничения по ТЗ: множители <= 3 разряда, делимое <= 6, делители <= 4
+  body('multiplyDigits1').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 3)),
+  body('multiplyDigits2').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 3)),
+  body('multiplyDigits3').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 3)),
+  body('divisionDividendDigits').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 6)),
+  body('divisionDivisorDigits').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 4)),
+  body('divisionSecondDivisorDigits').optional({ nullable: true }).custom(v => v === null || (Number.isInteger(v) && v >= 1 && v <= 4)),
   body('preStartPause').optional().isInt({ min: 0, max: 60 }),
   body('answerPause').optional().isInt({ min: 0, max: 120 }),
   body('resultPause').optional().isInt({ min: 0, max: 60 }),
@@ -470,7 +481,7 @@ router.get('/my-ip', async (req, res) => {
   const rawIp = (req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.socket?.remoteAddress || '').toString();
   const firstIp = rawIp.split(',')[0].trim();
   const ip = firstIp.replace('::ffff:', '');
-  const whitelist = [...(process.env.FREE_ACCESS_WHITELIST || '').split(',').map(s => s.trim()).filter(Boolean), '217.15.57.145'];
+  const whitelist = (process.env.FREE_ACCESS_WHITELIST || '').split(',').map(s => s.trim()).filter(Boolean);
   const whitelisted = ip && whitelist.includes(ip);
   res.json({ success: true, data: { ip, rawIp, whitelisted, whitelist } });
 });

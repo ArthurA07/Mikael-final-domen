@@ -5,27 +5,34 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "dev:mem": "USE_IN_MEMORY_DB=true nodemon index.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "mongoose": "^8.0.0",
     "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "express-validator": "^7.0.1",
-    "express-rate-limit": "^7.1.5",
-    "nodemailer": "^6.9.13",
-    "helmet": "^7.1.0",
+    "express": "^4.18.2",
     "express-mongo-sanitize": "^2.2.0",
-    "xss-clean": "^0.1.4",
-    "morgan": "^1.10.0"
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.0",
+    "morgan": "^1.10.0",
+    "nodemailer": "^6.9.13",
+    "xss-clean": "^0.1.4"
   },
   "devDependencies": {
+    "mongodb-memory-server": "^10.3.0",
     "nodemon": "^3.0.1"
   },
-  "keywords": ["express", "mongodb", "jwt", "api"],
+  "keywords": [
+    "express",
+    "mongodb",
+    "jwt",
+    "api"
+  ],
   "author": "",
   "license": "ISC"
-} 
+}

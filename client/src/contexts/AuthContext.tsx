@@ -122,8 +122,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return false;
     } catch (error: any) {
       console.error('Login error:', error);
-      // Можно добавить обработку ошибок (например, показ уведомления)
-      return false;
+      const msg =
+        error?.response?.data?.error?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Ошибка входа';
+      throw new Error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -145,7 +149,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return false;
     } catch (error: any) {
       console.error('Registration error:', error);
-      return false;
+      const msg =
+        error?.response?.data?.error?.message ||
+        error?.response?.data?.message ||
+        error?.message ||
+        'Ошибка регистрации';
+      throw new Error(msg);
     } finally {
       setIsLoading(false);
     }

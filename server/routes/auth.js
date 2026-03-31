@@ -7,6 +7,39 @@ const nodemailer = require('nodemailer');
 
 const router = express.Router();
 
+function buildResetEmailHtml(name, resetUrl, expireMinutes = 15) {
+  const displayName = name ? name.split(' ')[0] : 'друг';
+  return `
+  <div style="font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; background:#f7f7fb; padding:24px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;border:1px solid #eef0f4;">
+      <tr>
+        <td style="padding:24px 24px 8px 24px;text-align:center;">
+          <div style="font-size:20px;font-weight:700;color:#4a58a3">Mikael Mental Arithmetic</div>
+          <div style="margin-top:6px;font-size:12px;color:#7f8c8d;">Сброс пароля</div>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:8px 24px 0 24px;">
+          <p style="font-size:14px;color:#2c3e50;margin:0 0 12px 0;">Здравствуйте, ${displayName}!</p>
+          <p style="font-size:14px;color:#2c3e50;margin:0 0 12px 0;">Вы запросили сброс пароля. Нажмите кнопку ниже, чтобы задать новый пароль.</p>
+          <div style="text-align:center;margin:22px 0;">
+            <a href="${resetUrl}" style="display:inline-block;background:linear-gradient(45deg, #667eea, #764ba2);color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;font-weight:600">Сбросить пароль</a>
+          </div>
+          <p style="font-size:13px;color:#7f8c8d;margin:0 0 10px 0;">Ссылка действительна <strong>${expireMinutes} минут</strong>. Если вы не запрашивали сброс — просто игнорируйте это письмо.</p>
+          <p style="font-size:12px;color:#95a5a6;margin:0;">Если кнопка не работает, скопируйте ссылку в браузер:<br/>
+            <span style="word-break:break-all;color:#4a58a3">${resetUrl}</span>
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:16px 24px 24px 24px;text-align:center;">
+          <div style="font-size:11px;color:#95a5a6;">© ${new Date().getFullYear()} Mikael. Все права защищены.</div>
+        </td>
+      </tr>
+    </table>
+  </div>`;
+}
+
 // Регистрация пользователя
 router.post('/register', [
   body('name')
@@ -315,8 +348,9 @@ router.post('/forgot-password', [
     const mailOptions = {
       from: process.env.SMTP_FROM || 'no-reply@mikael-final.app',
       to: email,
-      subject: 'Восстановление пароля',
-      text: `Для сброса пароля перейдите по ссылке: ${resetUrl} (действует 15 минут)`
+      subject: 'Восстановление пароля — Mikael',
+      text: `Здравствуйте! Для сброса пароля перейдите по ссылке: ${resetUrl}\n\nСсылка действует 15 минут. Если вы не запрашивали сброс — просто игнорируйте это письмо.`,
+      html: buildResetEmailHtml(user?.name, resetUrl, 15),
     };
     try { await transporter.sendMail(mailOptions); } catch (e) { console.warn('Mail send warning', e?.message); }
 

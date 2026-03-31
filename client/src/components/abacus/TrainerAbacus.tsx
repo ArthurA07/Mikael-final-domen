@@ -58,7 +58,7 @@ const AbacusFrame = styled(Box)<{ adaptiveSizes: any }>(({ adaptiveSizes }) => (
   `,
   borderRadius: '15px',
   padding: adaptiveSizes.framePadding,
-  width: adaptiveSizes.frameWidth,
+  width: '100%',
   maxWidth: '500px',
   margin: '0 auto',
   position: 'relative',
@@ -67,6 +67,7 @@ const AbacusFrame = styled(Box)<{ adaptiveSizes: any }>(({ adaptiveSizes }) => (
   flexDirection: 'column',
   alignItems: 'center',
   minHeight: adaptiveSizes.rodHeight + 60,
+  overflow: 'hidden',
 }));
 
 const Crossbeam = styled(Box)<{ adaptiveSizes: any }>(({ adaptiveSizes }) => ({
@@ -139,6 +140,13 @@ const TrainerAbacus: React.FC<TrainerAbacusProps> = ({
     [columnsCount, isMobile]
   );
 
+  // Дополнительное масштабирование для больших разрядов.
+  // Даже если размеры уже "компактные", минимальные bead размеры могут не дать поместиться на рамку.
+  const scale = useMemo(() => {
+    const base = isMobile ? 5 / columnsCount : 7 / columnsCount;
+    return Math.max(0.55, Math.min(1, base));
+  }, [columnsCount, isMobile]);
+
   // Конвертация числа в состояние абакуса - мемоизированная функция
   const numberToAbacus = useCallback((num: number, colCount: number): AbacusColumn[] => {
     const numStr = Math.abs(num).toString().padStart(colCount, '0');
@@ -169,7 +177,7 @@ const TrainerAbacus: React.FC<TrainerAbacusProps> = ({
       adaptiveSizes.lowerSectionHeight - adaptiveSizes.beadLowerHeight - 5;
 
     return (
-      <Box key={columnKey} sx={{ position: 'relative', mx: 1 }}>
+      <Box key={columnKey} sx={{ position: 'relative', mx: 0.5 }}>
         <Rod adaptiveSizes={adaptiveSizes}>
           {/* Верхняя костяшка */}
           <Bead
@@ -208,7 +216,7 @@ const TrainerAbacus: React.FC<TrainerAbacusProps> = ({
             fontWeight: 'bold',
           }}
         >
-          {Math.pow(10, columns.length - 1 - columnIndex)}
+          {columns.length <= 6 ? Math.pow(10, columns.length - 1 - columnIndex) : ''}
         </Typography>
       </Box>
     );
@@ -243,6 +251,8 @@ const TrainerAbacus: React.FC<TrainerAbacusProps> = ({
             position: 'relative',
             zIndex: 10,
             mt: 1,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top center',
           }}>
             {columns.map((column, columnIndex) => renderColumn(column, columnIndex))}
           </Box>

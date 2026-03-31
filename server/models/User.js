@@ -13,7 +13,7 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Email обязателен'],
     unique: true,
     lowercase: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Введите корректный email']
+    match: [/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i, 'Введите корректный email']
   },
   password: {
     type: String,
@@ -54,8 +54,8 @@ const userSchema = new mongoose.Schema({
     },
     numberRange: {
       type: Number,
-      default: 10,
-      enum: [1, 10, 100, 1000, 10000]
+      default: 9,
+      enum: [9, 99, 999, 999999, 1000000]
     },
     operations: {
       type: [String],
@@ -73,11 +73,13 @@ const userSchema = new mongoose.Schema({
       default: 'digits',
       enum: ['digits', 'abacus']
     },
-    // Новые настройки тренажёра
-    multiplyDigits1: { type: Number, min: 1, max: 6, default: undefined },
-    multiplyDigits2: { type: Number, min: 1, max: 6, default: undefined },
-    divisionDividendDigits: { type: Number, min: 1, max: 9, default: undefined },
-    divisionDivisorDigits: { type: Number, min: 1, max: 6, default: undefined },
+    // Новые настройки тренажёра (ограничения по ТЗ)
+    multiplyDigits1: { type: Number, min: 1, max: 3, default: undefined },
+    multiplyDigits2: { type: Number, min: 1, max: 3, default: undefined },
+    multiplyDigits3: { type: Number, min: 1, max: 3, default: undefined },
+    divisionDividendDigits: { type: Number, min: 1, max: 6, default: undefined },
+    divisionDivisorDigits: { type: Number, min: 1, max: 4, default: undefined },
+    divisionSecondDivisorDigits: { type: Number, min: 1, max: 4, default: undefined },
     preStartPause: { type: Number, min: 0, max: 60, default: 0 },
     answerPause: { type: Number, min: 0, max: 120, default: 0 },
     resultPause: { type: Number, min: 0, max: 60, default: 0 },

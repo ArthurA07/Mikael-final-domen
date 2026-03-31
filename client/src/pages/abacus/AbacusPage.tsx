@@ -9,6 +9,7 @@ const AbacusPage: React.FC = () => {
   const [checking, setChecking] = useState(true);
   const [allowed, setAllowed] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [used, setUsed] = useState<number | null>(null);
 
   useEffect(() => {
     const check = async () => {
@@ -18,6 +19,7 @@ const AbacusPage: React.FC = () => {
         if (res.data?.success && res.data?.data?.allowed) {
           setAllowed(true);
           setExpiresAt(res.data.data.expiresAt || null);
+          if (typeof res.data.data.exercisesUsed === 'number') setUsed(res.data.data.exercisesUsed);
         } else {
           setAllowed(false);
         }
@@ -59,7 +61,7 @@ const AbacusPage: React.FC = () => {
       {/* Время окончания сессии */}
       {expiresAt && (
         <Paper elevation={2} sx={{ p: 2, mb: 2, textAlign: 'center' }}>
-          <Typography variant="body2">Бесплатный доступ активен до: {new Date(expiresAt).toLocaleTimeString()}</Typography>
+          <Typography variant="body2">Бесплатный доступ активен до: {new Date(expiresAt).toLocaleTimeString()}{used !== null ? ` · Использовано: ${used}` : ''}</Typography>
         </Paper>
       )}
       {/* Описание и сам абакус */}

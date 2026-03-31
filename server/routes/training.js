@@ -9,51 +9,75 @@ const router = express.Router();
 // Все маршруты требуют аутентификации
 router.use(protect);
 
-// Генерация случайного числа в диапазоне
+// Ограничения по ТЗ (должны совпадать с клиентским генератором)
+const MAX_MUL_VALUE = 999; // 3 разряда
+const MAX_DIVIDEND_VALUE = 999999; // 6 разрядов
+const MAX_DIVISOR_VALUE = 9999; // 4 разряда
+
+// Генерация случайного числа в диапазоне (1..range), без нулей
 const generateRandomNumber = (range) => {
   if (range === 1) return Math.floor(Math.random() * 9) + 1; // 1-9
-  return Math.floor(Math.random() * range);
+  const hi = Math.max(1, Math.floor(range));
+  return Math.floor(Math.random() * hi) + 1;
 };
 
-// Генерация примера
+const randomIntInclusive = (min, max) => {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  return Math.floor(Math.random() * (hi - lo + 1)) + lo;
+};
+
+// Генерация примера (без нулей, с ограничениями для ×/÷)
 const generateProblem = (settings) => {
   const { numbersCount, numberRange, operations } = settings;
-  const numbers = [];
-  
-  // Генерируем числа
-  for (let i = 0; i < numbersCount; i++) {
-    numbers.push(generateRandomNumber(numberRange));
-  }
-  
-  // Выбираем случайную операцию
   const operation = operations[Math.floor(Math.random() * operations.length)];
-  
-  // Вычисляем правильный ответ
+  const count = Math.max(2, Math.min(Number(numbersCount) || 2, (operation === '*' || operation === '/') ? 3 : 15));
+
+  // Умножение: каждый множитель <= 999
+  if (operation === '*') {
+    const cappedMax = Math.min(Number(numberRange) || 9, MAX_MUL_VALUE);
+    const nums = Array.from({ length: Math.min(count, 3) }, () => generateRandomNumber(cappedMax));
+    const correctAnswer = nums.reduce((p, n) => p * n, 1);
+    return { numbers: nums, operation, correctAnswer, difficulty: 3 };
+  }
+
+  // Деление: конструктивно, без делителя 1, делимое <= 999999, делители <= 9999
+  if (operation === '/') {
+    const divCount = Math.min(count, 3) - 1; // 1 или 2 делителя
+    const maxDividend = Math.min(MAX_DIVIDEND_VALUE, Number(numberRange) || MAX_DIVIDEND_VALUE);
+    const minDividend = 1;
+
+    const attempts = 80;
+    for (let a = 0; a < attempts; a++) {
+      const d1 = randomIntInclusive(2, MAX_DIVISOR_VALUE);
+      const d2 = divCount >= 2 ? randomIntInclusive(2, MAX_DIVISOR_VALUE) : 1;
+      const base = d1 * d2;
+      const qMax = Math.floor(maxDividend / base);
+      const qMin = Math.max(2, Math.ceil(minDividend / base));
+      if (qMax < qMin) continue;
+      const q = randomIntInclusive(qMin, qMax);
+      const dividend = base * q;
+      if (dividend < 1 || dividend > maxDividend) continue;
+      const nums = divCount >= 2 ? [dividend, d1, d2] : [dividend, d1];
+      return { numbers: nums, operation, correctAnswer: q, difficulty: 4 };
+    }
+    // Фолбэк
+    const d1 = 2;
+    const q = Math.max(2, Math.floor(maxDividend / d1) || 2);
+    return { numbers: [d1 * q, d1], operation, correctAnswer: q, difficulty: 4 };
+  }
+
+  // Остальные операции (±): обычный генератор, без нулей
+  const numbers = Array.from({ length: count }, () => generateRandomNumber(numberRange));
   let correctAnswer = numbers[0];
   for (let i = 1; i < numbers.length; i++) {
-    switch (operation) {
-      case '+':
-        correctAnswer += numbers[i];
-        break;
-      case '-':
-        correctAnswer -= numbers[i];
-        break;
-      case '*':
-        correctAnswer *= numbers[i];
-        break;
-      case '/':
-        if (numbers[i] !== 0) {
-          correctAnswer = Math.round(correctAnswer / numbers[i]);
-        }
-        break;
-    }
+    correctAnswer = operation === '+' ? (correctAnswer + numbers[i]) : (correctAnswer - numbers[i]);
   }
-  
   return {
     numbers,
     operation,
     correctAnswer,
-    difficulty: Math.ceil(Math.log10(numberRange)) + (numbersCount - 1) * 0.5
+    difficulty: Math.ceil(Math.log10(Math.max(2, Number(numberRange) || 9))) + (count - 1) * 0.5
   };
 };
 
@@ -167,6 +191,7 @@ router.post('/complete', [
       problems: problems.map((p) => ({
         numbers: p.numbers,
         operation: p.operation,
+        ops: Array.isArray(p.ops) ? p.ops : undefined,
         correctAnswer: p.correctAnswer,
         userAnswer: p.userAnswer ?? null,
         isCorrect: !!p.isCorrect,

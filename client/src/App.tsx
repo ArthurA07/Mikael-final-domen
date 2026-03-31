@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -7,26 +7,29 @@ import { UserProvider } from './contexts/UserContext';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
-import LegalPrivacy from './pages/LegalPrivacy';
-import LegalDataConsent from './pages/LegalDataConsent';
-import LegalUserAgreement from './pages/LegalUserAgreement';
-import LegalPublicOffer from './pages/LegalPublicOffer';
-import PricingPage from './pages/PricingPage';
-import HomePage from './pages/HomePage';
-import LoginPage from './pages/auth/LoginPage';
-import RegisterPage from './pages/auth/RegisterPage';
-import ForgotPassword from './pages/auth/ForgotPassword';
-import ResetPassword from './pages/auth/ResetPassword';
-import Dashboard from './pages/dashboard/Dashboard';
-import TrainerPage from './pages/trainer/TrainerPage';
-import AbacusPage from './pages/abacus/AbacusPage';
-import ProfilePage from './pages/profile/ProfilePage';
-import AchievementsPage from './pages/achievements/AchievementsPage';
-import StatsPage from './pages/stats/StatsPage';
-import HistoryPage from './pages/stats/HistoryPage';
-import TrainingDetailPage from './pages/stats/TrainingDetailPage';
-import AdminPage from './pages/admin/AdminPage';
-import AboutTrainer from './pages/AboutTrainer';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import Loading from './components/common/Loading';
+import NotFound from './pages/NotFound';
+const LegalPrivacy = lazy(() => import('./pages/LegalPrivacy'));
+const LegalDataConsent = lazy(() => import('./pages/LegalDataConsent'));
+const LegalUserAgreement = lazy(() => import('./pages/LegalUserAgreement'));
+const LegalPublicOffer = lazy(() => import('./pages/LegalPublicOffer'));
+const PricingPage = lazy(() => import('./pages/PricingPage'));
+const HomePage = lazy(() => import('./pages/HomePage'));
+const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/auth/RegisterPage'));
+const ForgotPassword = lazy(() => import('./pages/auth/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/auth/ResetPassword'));
+const Dashboard = lazy(() => import('./pages/dashboard/Dashboard'));
+const TrainerPage = lazy(() => import('./pages/trainer/TrainerPage'));
+const AbacusPage = lazy(() => import('./pages/abacus/AbacusPage'));
+const ProfilePage = lazy(() => import('./pages/profile/ProfilePage'));
+const AchievementsPage = lazy(() => import('./pages/achievements/AchievementsPage'));
+const StatsPage = lazy(() => import('./pages/stats/StatsPage'));
+const HistoryPage = lazy(() => import('./pages/stats/HistoryPage'));
+const TrainingDetailPage = lazy(() => import('./pages/stats/TrainingDetailPage'));
+const AdminPage = lazy(() => import('./pages/admin/AdminPage'));
+const AboutTrainer = lazy(() => import('./pages/AboutTrainer'));
 
 // Создаём тему для приложения
 const theme = createTheme({
@@ -284,62 +287,64 @@ function App() {
           <Router>
             <div className="App">
               <Navbar />
+              <ErrorBoundary>
               <Routes>
+                <Route path="*" element={<Suspense fallback={<Loading />}><Navigate to="/404" replace /></Suspense>} />
                 {/* Публичные маршруты */}
-                <Route path="/" element={<HomePage />} />
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<RegisterPage />} />
-                <Route path="/pricing" element={<PricingPage />} />
-                <Route path="/forgot-password" element={<ForgotPassword />} />
-                <Route path="/reset-password" element={<ResetPassword />} />
-                <Route path="/privacy" element={<LegalPrivacy />} />
-                <Route path="/data-consent" element={<LegalDataConsent />} />
-                <Route path="/user-agreement" element={<LegalUserAgreement />} />
-                <Route path="/public-offer" element={<LegalPublicOffer />} />
-                <Route path="/about" element={<AboutTrainer />} />
+                <Route path="/" element={<Suspense fallback={<Loading />}><HomePage /></Suspense>} />
+                <Route path="/login" element={<Suspense fallback={<Loading />}><LoginPage /></Suspense>} />
+                <Route path="/register" element={<Suspense fallback={<Loading />}><RegisterPage /></Suspense>} />
+                <Route path="/pricing" element={<Suspense fallback={<Loading />}><PricingPage /></Suspense>} />
+                <Route path="/forgot-password" element={<Suspense fallback={<Loading />}><ForgotPassword /></Suspense>} />
+                <Route path="/reset-password" element={<Suspense fallback={<Loading />}><ResetPassword /></Suspense>} />
+                <Route path="/privacy" element={<Suspense fallback={<Loading />}><LegalPrivacy /></Suspense>} />
+                <Route path="/data-consent" element={<Suspense fallback={<Loading />}><LegalDataConsent /></Suspense>} />
+                <Route path="/user-agreement" element={<Suspense fallback={<Loading />}><LegalUserAgreement /></Suspense>} />
+                <Route path="/public-offer" element={<Suspense fallback={<Loading />}><LegalPublicOffer /></Suspense>} />
+                <Route path="/about" element={<Suspense fallback={<Loading />}><AboutTrainer /></Suspense>} />
+                <Route path="/404" element={<NotFound />} />
                 
                 {/* Защищённые маршруты */}
                 <Route path="/dashboard" element={
                   <ProtectedRoute>
-                    <Dashboard />
+                    <Suspense fallback={<Loading />}><Dashboard /></Suspense>
                   </ProtectedRoute>
                 } />
-                <Route path="/trainer" element={<TrainerPage />} />
-                <Route path="/abacus" element={<AbacusPage />} />
+                <Route path="/trainer" element={<Suspense fallback={<Loading />}><TrainerPage /></Suspense>} />
+                <Route path="/abacus" element={<Suspense fallback={<Loading />}><AbacusPage /></Suspense>} />
                 <Route path="/profile" element={
                   <ProtectedRoute>
-                    <ProfilePage />
+                    <Suspense fallback={<Loading />}><ProfilePage /></Suspense>
                   </ProtectedRoute>
                 } />
                 <Route path="/achievements" element={
                   <ProtectedRoute>
-                    <AchievementsPage />
+                    <Suspense fallback={<Loading />}><AchievementsPage /></Suspense>
                   </ProtectedRoute>
                 } />
                 <Route path="/stats" element={
                   <ProtectedRoute>
-                    <StatsPage />
+                    <Suspense fallback={<Loading />}><StatsPage /></Suspense>
                   </ProtectedRoute>
                 } />
                 <Route path="/stats/history" element={
                   <ProtectedRoute>
-                    <HistoryPage />
+                    <Suspense fallback={<Loading />}><HistoryPage /></Suspense>
                   </ProtectedRoute>
                 } />
                 <Route path="/stats/history/:id" element={
                   <ProtectedRoute>
-                    <TrainingDetailPage />
+                    <Suspense fallback={<Loading />}><TrainingDetailPage /></Suspense>
                   </ProtectedRoute>
                 } />
                 <Route path="/admin" element={
                   <ProtectedRoute>
-                    <AdminPage />
+                    <Suspense fallback={<Loading />}><AdminPage /></Suspense>
                   </ProtectedRoute>
                 } />
                 
-                {/* Перенаправление на главную для несуществующих маршрутов */}
-                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
+              </ErrorBoundary>
               <Footer />
             </div>
           </Router>

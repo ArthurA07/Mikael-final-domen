@@ -31,11 +31,15 @@ const RegisterPage: React.FC = () => {
     }
     setFieldErrors(nextFieldErrors);
     if (Object.keys(nextFieldErrors).length > 0) return;
-    const ok = await register({ name, email, password });
-    if (ok) {
-      navigate('/dashboard', { replace: true });
-    } else {
-      setError('Не удалось зарегистрироваться. Проверьте данные.');
+    try {
+      const ok = await register({ name, email, password });
+      if (ok) {
+        navigate('/dashboard', { replace: true });
+      } else {
+        setError('Не удалось зарегистрироваться. Проверьте данные.');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Не удалось зарегистрироваться');
     }
   };
 

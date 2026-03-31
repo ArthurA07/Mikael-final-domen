@@ -9,11 +9,20 @@ const ResetPassword: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [password2, setPassword2] = useState('');
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+    if (!password || password.length < 6) {
+      setError('Минимум 6 символов.');
+      return;
+    }
+    if (password !== password2) {
+      setError('Пароли не совпадают.');
+      return;
+    }
     try {
       setLoading(true);
       const res = await axios.post('/auth/reset-password', { token, password });
@@ -41,6 +50,15 @@ const ResetPassword: React.FC = () => {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            fullWidth
+            required
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            label="Повторите пароль"
+            type="password"
+            value={password2}
+            onChange={(e) => setPassword2(e.target.value)}
             fullWidth
             required
             sx={{ mb: 2 }}

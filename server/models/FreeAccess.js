@@ -5,6 +5,8 @@ const freeAccessSchema = new mongoose.Schema({
   startedAt: { type: Date, required: true },
   expiresAt: { type: Date, required: true },
   blocked: { type: Boolean, default: false },
+  exercisesUsed: { type: Number, default: 0 }, // сколько примеров показано/решено гостю
+  lastUsedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FreeAccess', freeAccessSchema); 

@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { useUser } from '../../contexts/UserContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   Box,
   Typography,
@@ -341,15 +342,27 @@ const StatsChip = styled(Chip)(({ theme }) => ({
 const InteractiveAbacus: React.FC = () => {
   const theme = useTheme();
   const { updateUserStats, refreshUserStats, userStats } = useUser();
+  const { isAuthenticated } = useAuth();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
+
+  // Форматирование чисел с разделителями тысяч (для отображения)
+  const formatNumber = useCallback((value: number | null | undefined): string => {
+    if (value === null || value === undefined || Number.isNaN(value)) return '';
+    try {
+      return new Intl.NumberFormat('ru-RU').format(value);
+    } catch {
+      return String(value);
+    }
+  }, []);
+
   const [state, setState] = useState<AbacusState>({
     columns: Array(5).fill(null).map(() => ({ upper: false, lower: 0 })),
     showValue: true,
     showLabels: true,
     columnsCount: 5,
     gameMode: false,
-    gameRange: { min: 1, max: 99999 },
+    // По умолчанию 5-разрядное число: 10000–99999
+    gameRange: { min: 10000, max: 99999 },
     targetNumber: null,
     gameResult: 'none',
     speed: 1,
@@ -373,6 +386,8 @@ const InteractiveAbacus: React.FC = () => {
   const [demoTimeouts, setDemoTimeouts] = useState<NodeJS.Timeout[]>([]);
   const [demoWaitingForColumns, setDemoWaitingForColumns] = useState(false);
   const [draftValue, setDraftValue] = useState<string>('0');
+  const [demoSeq, setDemoSeq] = useState<number[] | null>(null);
+  const [demoInfo, setDemoInfo] = useState<string | null>(null);
 
   // Очистка таймеров при размонтировании
   useEffect(() => {
@@ -520,6 +535,14 @@ const InteractiveAbacus: React.FC = () => {
     setState(prev => ({ ...prev, columns: newColumns }));
   }, [state.gameMode, playSound, state.columns.length]);
 
+  // Полный сброс абакуса и игровых состояний
+  const resetAbacus = useCallback(() => {
+    const newColumns = state.columns.map(() => ({ upper: false, lower: 0 }));
+    setState(prev => ({ ...prev, columns: newColumns, gameMode: false, gameResult: 'none', targetNumber: null }));
+    setDraftValue('0');
+    setDemoInfo(null);
+  }, [state.columns]);
+
   // Игровые функции
   const startGame = useCallback(() => {
     const min = Math.max(state.gameRange.min, 0);
@@ -527,6 +550,7 @@ const InteractiveAbacus: React.FC = () => {
     const targetNumber = Math.floor(Math.random() * (max - min + 1)) + min;
     
     resetAbacus();
+    setDemoInfo(null);
     setStartTime(Date.now());
     setState(prev => ({
       ...prev,
@@ -536,7 +560,7 @@ const InteractiveAbacus: React.FC = () => {
     }));
     // Скрываем текущее значение из поля до проверки
     setDraftValue('');
-  }, [state.gameRange, state.columns.length]);
+  }, [state.gameRange, state.columns.length, resetAbacus]);
 
   const checkAnswer = useCallback(async () => {
     if (!state.targetNumber || !startTime) return;
@@ -568,6 +592,21 @@ const InteractiveAbacus: React.FC = () => {
       setTimeout(() => {
         playSound('complete');
       }, 500);
+    }
+
+    // Лимит пробного доступа для гостей (совместно с тренажёром)
+    if (!isAuthenticated) {
+      try {
+        const res = await axios.post('/public/track-exercise');
+        if (res.data?.success && res.data?.data?.allowed === false) {
+          alert('Лимит бесплатных примеров исчерпан. Войдите или оформите доступ, чтобы продолжить.');
+          // Завершаем игровой режим
+          setState(prev => ({ ...prev, gameMode: false }));
+          return;
+        }
+      } catch (e) {
+        // не блокируем UI при ошибке сети
+      }
     }
 
     // Сохраняем статистику и историю на сервере (для авторизованных пользователей — токен уже проставлен в axios)
@@ -612,48 +651,6 @@ const InteractiveAbacus: React.FC = () => {
     }
   }, [state.targetNumber, state.columns, startTime, calculateValue, playSound, state.showHints]);
 
-  const resetAbacus = useCallback(() => {
-    const newColumns = state.columns.map(() => ({ upper: false, lower: 0 }));
-    setState(prev => ({ ...prev, columns: newColumns }));
-  }, [state.columnsCount]);
-
-  // Запуск демо когда разрядность изменилась на 5
-  useEffect(() => {
-    if (demoWaitingForColumns && state.columnsCount === 5) {
-      setDemoWaitingForColumns(false);
-      
-      const demoNumbers = [12345, 23456, 34567, 45678, 56789];
-      const timeouts: NodeJS.Timeout[] = [];
-      let currentDemo = 0;
-      
-      const showNextNumber = () => {
-        if (currentDemo < demoNumbers.length) {
-          setAbacusValue(demoNumbers[currentDemo], true);
-          currentDemo++;
-          if (currentDemo < demoNumbers.length) {
-            const nextTimeout = setTimeout(showNextNumber, 2500 / state.speed);
-            timeouts.push(nextTimeout);
-            setDemoTimeouts(prev => [...prev, nextTimeout]);
-          } else {
-            // Последнее число показали, через некоторое время завершаем демо
-            const endTimeout = setTimeout(() => {
-              resetAbacus();
-              setIsDemoRunning(false);
-              setDemoTimeouts([]);
-            }, 2500 / state.speed);
-            timeouts.push(endTimeout);
-            setDemoTimeouts(prev => [...prev, endTimeout]);
-          }
-        }
-      };
-      
-      // Начинаем демо с небольшой задержкой
-      const startTimeout = setTimeout(showNextNumber, 500);
-      timeouts.push(startTimeout);
-      setDemoTimeouts(timeouts);
-    }
-  }, [demoWaitingForColumns, state.columnsCount, setAbacusValue, resetAbacus, state.speed]);
-
   const changeColumnsCount = useCallback((count: number) => {
     console.log('!!! changeColumnsCount ВЫЗВАН !!!', { 
       newCount: count, 
@@ -661,6 +658,9 @@ const InteractiveAbacus: React.FC = () => {
       stackTrace: new Error().stack 
     });
     const newColumns = Array(count).fill(null).map(() => ({ upper: false, lower: 0 }));
+    // Диапазон всегда соответствует разрядности: N колонок → N‑значное число
+    const minForDigits = count === 1 ? 1 : Math.pow(10, count - 1);
+    const maxForDigits = Math.pow(10, count) - 1;
     setState(prev => ({ 
       ...prev, 
       columns: newColumns, 
@@ -668,6 +668,7 @@ const InteractiveAbacus: React.FC = () => {
       gameMode: false,
       targetNumber: null,
       gameResult: 'none',
+      gameRange: { min: minForDigits, max: maxForDigits },
     }));
   }, []);
 
@@ -694,38 +695,15 @@ const InteractiveAbacus: React.FC = () => {
     setAbacusValue(next, true);
   }, [draftValue, state.columns.length, setAbacusValue]);
 
-  // Демонстрационный режим (всегда на 5 разрядах)
+  // Демонстрационный режим: каждое нажатие показывает новое случайное число
   const runDemo = useCallback(() => {
-    console.log('!!! runDemo ВЫЗВАН !!!', { 
-      isDemoRunning, 
-      columnsCount: state.columnsCount,
-      stackTrace: new Error().stack 
-    });
-    
-    // Если демо уже работает - останавливаем его
-    if (isDemoRunning) {
-      // Останавливаем все таймеры
-      demoTimeouts.forEach(timeout => clearTimeout(timeout));
-      setDemoTimeouts([]);
-      setIsDemoRunning(false);
-      setDemoWaitingForColumns(false);
-      resetAbacus();
-      return;
-    }
-
-    // Отмечаем что демо запущено
-    setIsDemoRunning(true);
-    
-    // Если уже 5 разрядов - запускаем демо через useEffect
-    if (state.columnsCount === 5) {
-      setDemoWaitingForColumns(true);
-    } else {
-      // Демо работает только на 5 разрядах
-      alert('Демо работает только на 5 разрядах. Пожалуйста, установите 5 разрядов вручную.');
-      setIsDemoRunning(false);
-      return;
-    }
-  }, [isDemoRunning, demoTimeouts, state.columnsCount]);
+    const cols = state.columnsCount || 5;
+    const maxVal = Math.pow(10, cols) - 1;
+    const minVal = Math.pow(10, cols - 1);
+    const n = Math.floor(Math.random() * (maxVal - minVal + 1)) + minVal;
+    setDemoInfo(`Демо число: ${formatNumber(n)}`);
+    setAbacusValue(n, true);
+  }, [state.columnsCount, setAbacusValue, formatNumber]);
 
   // Рендер одной колонки абакуса
   const renderColumn = useCallback((column: AbacusColumn, columnIndex: number) => {
@@ -831,6 +809,11 @@ const InteractiveAbacus: React.FC = () => {
           <Typography variant="h6" sx={{ fontWeight: 700, mr: 2, minWidth: 160 }}>
             🎮 Игровая панель
           </Typography>
+          {demoInfo && (
+            <Typography variant="body2" sx={{ color: 'rgba(255,255,255,0.9)' }}>
+              {demoInfo}
+            </Typography>
+          )}
           
           <Box sx={{ display: 'flex', flexDirection: 'column' }}>
             <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.9)', mb: 0.5 }}>
@@ -924,17 +907,16 @@ const InteractiveAbacus: React.FC = () => {
                 onClick={runDemo}
                 sx={{ 
                   color: 'white', 
-                  borderColor: 'white',
-                  backgroundColor: isDemoRunning ? 'rgba(255, 0, 0, 0.3)' : 'transparent'
+                  borderColor: 'white'
                 }}
               >
-                {isDemoRunning ? 'Стоп Демо' : 'Демо'}
+                Демо
               </Button>
             </>
           ) : (
             <>
               <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                Число: {state.targetNumber}
+                Число: {state.targetNumber != null ? formatNumber(state.targetNumber) : ''}
               </Typography>
               <Button
                 variant="contained"

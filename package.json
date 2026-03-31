@@ -5,7 +5,9 @@
   "main": "server/index.js",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "dev:mem": "concurrently \"npm run server:mem\" \"npm run client\"",
     "server": "cd server && npm run dev",
+    "server:mem": "cd server && npm run dev:mem",
     "client": "cd client && npm start",
     "build": "cd client && npm run build",
     "start": "cd server && npm start",

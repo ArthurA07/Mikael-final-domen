@@ -28,12 +28,16 @@ const LoginPage: React.FC = () => {
     }
     setFieldErrors(nextFieldErrors);
     if (Object.keys(nextFieldErrors).length > 0) return;
-    const ok = await login(email, password);
-    if (ok) {
-      const to = location.state?.from?.pathname || '/dashboard';
-      navigate(to, { replace: true });
-    } else {
-      setError('Неверный email или пароль');
+    try {
+      const ok = await login(email, password);
+      if (ok) {
+        const to = location.state?.from?.pathname || '/dashboard';
+        navigate(to, { replace: true });
+      } else {
+        setError('Неверный email или пароль');
+      }
+    } catch (e: any) {
+      setError(e?.message || 'Неверный email или пароль');
     }
   };
 

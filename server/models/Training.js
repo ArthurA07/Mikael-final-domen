@@ -91,6 +91,11 @@ const trainingSchema = new mongoose.Schema({
       type: String,
       enum: ['+', '-', '*', '/']
     },
+    // Последовательность операций между числами (для смешанных выражений, например + и -)
+    ops: [{
+      type: String,
+      enum: ['+', '-', '*', '/'],
+    }],
     correctAnswer: Number,
     userAnswer: {
       type: Number,

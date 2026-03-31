@@ -8,6 +8,32 @@ const router = express.Router();
 // Все админ-маршруты защищены и требуют роли admin
 router.use(protect, authorize('admin'));
 
+// Смена email текущего администратора
+router.post('/change-email', [
+  require('express-validator').body('newEmail').isEmail().withMessage('Введите корректный email')
+], async (req, res) => {
+  try {
+    const { validationResult } = require('express-validator');
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ error: { message: 'Ошибки валидации', details: errors.array() } });
+    }
+    const { newEmail } = req.body;
+    const exists = await User.findOne({ email: newEmail });
+    if (exists) return res.status(400).json({ error: { message: 'Пользователь с таким email уже существует' } });
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: { message: 'Пользователь не найден' } });
+    // фиксируем старый email в логе
+    const oldEmail = user.email;
+    user.email = newEmail;
+    await user.save();
+    res.json({ success: true, message: 'Email администратора обновлён', data: { oldEmail, newEmail } });
+  } catch (e) {
+    console.error('Admin change email error:', e);
+    res.status(500).json({ error: { message: 'Ошибка смены email' } });
+  }
+});
+
 // Список пользователей с поиском и пагинацией
 router.get('/users', async (req, res) => {
   try {
