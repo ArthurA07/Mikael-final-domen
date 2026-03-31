@@ -628,7 +628,9 @@ const TrainerPage: React.FC = () => {
         const serverAllowedKeys: (keyof typeof currentSettings)[] = [
           'numbersCount', 'numberRange', 'operations', 'displaySpeed', 'displayMode',
           // новые ключи, сохраняемые на сервер
-          'multiplyDigits1','multiplyDigits2','divisionDividendDigits','divisionDivisorDigits',
+          'numberRangeMin', 'lawsMode', 'showAnswer',
+          'multiplyDigits1','multiplyDigits2','multiplyDigits3',
+          'divisionDividendDigits','divisionDivisorDigits','divisionSecondDivisorDigits',
           'preStartPause','answerPause','resultPause','fontScale','randomPosition','randomColor','sequentialDisplay','twoScreens',
           'totalProblems'
         ];
@@ -724,6 +726,8 @@ const TrainerPage: React.FC = () => {
     if (!state.currentProblem) return null;
 
     const { numbers, operation } = state.currentProblem;
+    const isTwoScreens = !!(currentSettings as any).twoScreens;
+    const canSubmitCurrentAnswer = Boolean(state.userAnswer && (!isTwoScreens || (state as any).userAnswerB));
 
     // Визуальные "рандомизации" (позиция/цвет) должны работать и в sequential режиме.
     // Делаем детерминированно (по индексу примера и шага), чтобы не дёргалось на каждом ререндере.
@@ -924,14 +928,14 @@ const TrainerPage: React.FC = () => {
             <Typography variant="h4" sx={{ mb: 3, color: theme.palette.text.secondary }}>
               Сколько получилось?
             </Typography>
-            {((currentSettings as any).twoScreens) ? (
+            {isTwoScreens ? (
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center" justifyContent="center">
                 <Box>
                   <Typography variant="subtitle2" sx={{ textAlign: 'center', mb: 1 }}>Игрок A</Typography>
                   <TextField
                     value={state.userAnswer}
                     onChange={(e) => setState(prev => ({ ...prev, userAnswer: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') submitAnswer(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && canSubmitCurrentAnswer) submitAnswer(); }}
                     placeholder="Ответ A"
                     variant="outlined"
                     sx={{ 
@@ -946,7 +950,7 @@ const TrainerPage: React.FC = () => {
                   <TextField
                     value={(state as any).userAnswerB}
                     onChange={(e) => setState(prev => ({ ...prev, userAnswerB: e.target.value } as any))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') submitAnswer(); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && canSubmitCurrentAnswer) submitAnswer(); }}
                     placeholder="Ответ B"
                     variant="outlined"
                     sx={{ 
@@ -960,7 +964,7 @@ const TrainerPage: React.FC = () => {
               <TextField
                 value={state.userAnswer}
                 onChange={(e) => setState(prev => ({ ...prev, userAnswer: e.target.value }))}
-                onKeyDown={(e) => { if (e.key === 'Enter') submitAnswer(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && canSubmitCurrentAnswer) submitAnswer(); }}
                 placeholder="Введите ответ"
                 variant="outlined"
                 sx={{ 
@@ -975,7 +979,7 @@ const TrainerPage: React.FC = () => {
                 variant="contained"
                 size="large"
                 onClick={submitAnswer}
-                disabled={((currentSettings as any).twoScreens ? (!state.userAnswer || !(state as any).userAnswerB) : !state.userAnswer)}
+                disabled={!canSubmitCurrentAnswer}
               >
                 Ответить
               </Button>

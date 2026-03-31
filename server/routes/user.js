@@ -41,6 +41,10 @@ router.put('/trainer-settings', [
     .optional()
     .isIn([9, 99, 999, 999999, 1000000])
     .withMessage('Неверный диапазон чисел (используйте 9,99,999,999999,1000000)'),
+  body('numberRangeMin')
+    .optional()
+    .isInt({ min: 1 })
+    .withMessage('Минимум диапазона должен быть положительным целым числом'),
   body('operations')
     .optional()
     .isArray()

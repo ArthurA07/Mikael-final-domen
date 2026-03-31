@@ -57,6 +57,11 @@ const userSchema = new mongoose.Schema({
       default: 9,
       enum: [9, 99, 999, 999999, 1000000]
     },
+    numberRangeMin: {
+      type: Number,
+      default: 1,
+      min: 1
+    },
     operations: {
       type: [String],
       default: ['+'],
@@ -98,6 +103,15 @@ const userSchema = new mongoose.Schema({
     showAnswer: {
       type: Boolean,
       default: true
+    },
+    twoScreens: {
+      type: Boolean,
+      default: false
+    },
+    lawsMode: {
+      type: String,
+      default: 'none',
+      enum: ['none', 'five', 'ten', 'both']
     },
     progressiveMode: {
       type: Boolean,

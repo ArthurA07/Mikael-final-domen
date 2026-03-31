@@ -232,11 +232,14 @@ export function generateProblemFactory(settings: GeneratorSettings) {
                     }
                   }
               } else {
-                // Закон на 10: берём строгий комплемент до 10 в выбранном разряде
+                // Закон на 10: нужен перенос в выбранном разряде (digit + step >= 10).
+                // ВАЖНО: не ограничиваемся только "комплементом до 10", иначе примеры
+                // становятся шаблонными (9+1, 8+2, ...). Берём шаг из диапазона [need..9].
                 const need = (10 - (d % 10)) % 10; // 0..9
-                // need==0 означает, что единицы уже кратны 10; такой шаг не тренировочный — пробуем другую позицию/попытку
-                if (need > 0) {
-                  const n = need * place;
+                // need==0 означает, что в этом разряде перенос не нужен/невозможен для шага 1..9.
+                if (need > 0 && need <= 9) {
+                  const stepDigit = randomIntInclusive(9, need); // гарантирует перенос, добавляет вариативность
+                  const n = stepDigit * place;
                   if (n <= maxValue) {
                     numbers.push(n);
                     current += n;
@@ -318,6 +321,7 @@ export function generateProblemFactory(settings: GeneratorSettings) {
       if (wantsMixedPlusMinus) {
         // Генерируем как минимум один '+' и один '-'
         const maxAttempts = 25;
+        let builtMixed = false;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           opsSequence = Array.from({ length: effectiveNumbersCount - 1 }, () => (Math.random() < 0.5 ? '+' : '-')) as Operation[];
           if (!opsSequence.includes('+')) opsSequence[0] = '+';
@@ -343,7 +347,34 @@ export function generateProblemFactory(settings: GeneratorSettings) {
               acc -= n;
             }
           }
-          if (ok) break;
+          if (ok) {
+            builtMixed = true;
+            break;
+          }
+        }
+        // Защитный фолбэк: даже если случайная генерация не нашла корректную цепочку,
+        // возвращаем валидный пример с обеими операциями и неотрицательными промежуточными значениями.
+        if (!builtMixed) {
+          opsSequence = Array.from(
+            { length: effectiveNumbersCount - 1 },
+            (_, idx) => (idx % 2 === 0 ? '+' : '-')
+          ) as Operation[];
+          numbers.length = 0;
+          let acc = Math.max(minValue, Math.min(maxValue, Math.max(minValue * 2, Math.floor(maxValue * 0.7))));
+          numbers.push(acc);
+          for (let i = 0; i < opsSequence.length; i++) {
+            const op = opsSequence[i];
+            if (op === '+') {
+              const n = Math.max(minValue, Math.min(maxValue, Math.max(minValue, Math.floor(maxValue / 2))));
+              numbers.push(n);
+              acc += n;
+            } else {
+              const hi = Math.max(minValue, Math.min(maxValue, acc));
+              const n = Math.max(minValue, Math.min(hi, Math.max(minValue, Math.floor(acc / 2))));
+              numbers.push(n);
+              acc -= n;
+            }
+          }
         }
       } else {
         // ВАЖНО: при вычитании не допускаем отрицательный итог в любом случае (не только когда выбрана одна операция '-').

@@ -137,6 +137,21 @@ describe('problem generator', () => {
     }
   });
 
+  test('laws ten addition is not limited to strict complements', () => {
+    const gen = generateProblemFactory({ numbersCount: 2, numberRange: 9, operations: ['+'], lawsMode: 'ten' });
+    let seenGreaterThanTen = false;
+    for (let i = 0; i < 80; i++) {
+      const p = gen();
+      const s = (p.numbers[0] % 10) + (p.numbers[1] % 10);
+      expect(s).toBeGreaterThanOrEqual(10);
+      if (s > 10) {
+        seenGreaterThanTen = true;
+        break;
+      }
+    }
+    expect(seenGreaterThanTen).toBe(true);
+  });
+
   test('mixed +/- contains both ops when both requested', () => {
     const gen = generateProblemFactory({ numbersCount: 5, numberRange: 20, operations: ['+','-'] });
     let seenBoth = false;
@@ -148,6 +163,22 @@ describe('problem generator', () => {
       }
     }
     expect(seenBoth).toBe(true);
+  });
+
+  test('mixed +/- always returns full-length valid problem and consistent answer', () => {
+    const gen = generateProblemFactory({ numbersCount: 12, numberRange: 99, operations: ['+', '-'] });
+    for (let i = 0; i < 80; i++) {
+      const p = gen();
+      expect(p.numbers.length).toBe(12);
+      expect(p.ops).toBeDefined();
+      expect(p.ops?.length).toBe(11);
+      let acc = p.numbers[0];
+      for (let j = 1; j < p.numbers.length; j++) {
+        const op = p.ops![j - 1];
+        acc = op === '+' ? acc + p.numbers[j] : acc - p.numbers[j];
+      }
+      expect(p.correctAnswer).toBe(acc);
+    }
   });
 
   test('subtraction-only yields non-negative results', () => {
@@ -179,6 +210,40 @@ describe('problem generator', () => {
       expect(Math.min(...p.numbers)).toBeGreaterThanOrEqual(1);
       expect(p.correctAnswer).toBe(p.numbers.reduce((s, n) => s + n, 0));
     }
+  });
+
+  test('laws ten long sequence stays full-length and mathematically consistent', () => {
+    const gen = generateProblemFactory({ numbersCount: 10, numberRange: 999, operations: ['+', '-'], lawsMode: 'ten' });
+    for (let i = 0; i < 30; i++) {
+      const p = gen();
+      expect(p.numbers.length).toBe(10);
+      expect(p.ops).toBeDefined();
+      expect(p.ops?.length).toBe(9);
+      let acc = p.numbers[0];
+      for (let j = 1; j < p.numbers.length; j++) {
+        const op = p.ops![j - 1];
+        acc = op === '+' ? acc + p.numbers[j] : acc - p.numbers[j];
+      }
+      expect(p.correctAnswer).toBe(acc);
+      expect(Math.min(...p.numbers)).toBeGreaterThanOrEqual(0);
+      expect(Math.max(...p.numbers)).toBeLessThanOrEqual(999);
+    }
+  });
+
+  test('laws both long sequence stays full-length and keeps mixed +/- available', () => {
+    const gen = generateProblemFactory({ numbersCount: 12, numberRange: 999, operations: ['+', '-'], lawsMode: 'both' });
+    let seenPlus = false;
+    let seenMinus = false;
+    for (let i = 0; i < 30; i++) {
+      const p = gen();
+      expect(p.numbers.length).toBe(12);
+      expect(p.ops).toBeDefined();
+      expect(p.ops?.length).toBe(11);
+      if (p.ops?.includes('+')) seenPlus = true;
+      if (p.ops?.includes('-')) seenMinus = true;
+    }
+    expect(seenPlus).toBe(true);
+    expect(seenMinus).toBe(true);
   });
 });
 
