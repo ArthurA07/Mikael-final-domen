@@ -11,9 +11,7 @@ import { ErrorBoundary } from './components/common/ErrorBoundary';
 import Loading from './components/common/Loading';
 import NotFound from './pages/NotFound';
 const LegalPrivacy = lazy(() => import('./pages/LegalPrivacy'));
-const LegalDataConsent = lazy(() => import('./pages/LegalDataConsent'));
 const LegalUserAgreement = lazy(() => import('./pages/LegalUserAgreement'));
-const LegalPublicOffer = lazy(() => import('./pages/LegalPublicOffer'));
 const PricingPage = lazy(() => import('./pages/PricingPage'));
 const HomePage = lazy(() => import('./pages/HomePage'));
 const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
@@ -298,9 +296,9 @@ function App() {
                 <Route path="/forgot-password" element={<Suspense fallback={<Loading />}><ForgotPassword /></Suspense>} />
                 <Route path="/reset-password" element={<Suspense fallback={<Loading />}><ResetPassword /></Suspense>} />
                 <Route path="/privacy" element={<Suspense fallback={<Loading />}><LegalPrivacy /></Suspense>} />
-                <Route path="/data-consent" element={<Suspense fallback={<Loading />}><LegalDataConsent /></Suspense>} />
                 <Route path="/user-agreement" element={<Suspense fallback={<Loading />}><LegalUserAgreement /></Suspense>} />
-                <Route path="/public-offer" element={<Suspense fallback={<Loading />}><LegalPublicOffer /></Suspense>} />
+                <Route path="/data-consent" element={<Navigate to="/privacy" replace />} />
+                <Route path="/public-offer" element={<Navigate to="/user-agreement" replace />} />
                 <Route path="/about" element={<Suspense fallback={<Loading />}><AboutTrainer /></Suspense>} />
                 <Route path="/404" element={<NotFound />} />
                 

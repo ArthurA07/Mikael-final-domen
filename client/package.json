@@ -53,7 +53,6 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "http://localhost:5000",
   "devDependencies": {
     "@types/chart.js": "^2.9.41"
   }

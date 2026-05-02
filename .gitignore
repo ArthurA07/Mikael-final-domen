@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Local runtime data
+_data/
+server/.env
+*.log
+
+# Local dependency folders (may already exist in history)
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Local frontend build output
+client/build/

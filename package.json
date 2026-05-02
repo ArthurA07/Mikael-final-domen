@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Интерактивный тренажёр ментальной арифметики с абакусом",
   "main": "server/index.js",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "dev:mem": "concurrently \"npm run server:mem\" \"npm run client\"",
@@ -11,7 +14,9 @@
     "client": "cd client && npm start",
     "build": "cd client && npm run build",
     "start": "cd server && npm start",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install"
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "sync:check": "bash ./scripts/check_sync_state.sh",
+    "sync:apply": "bash ./scripts/sync_main_to_github_and_server.sh"
   },
   "keywords": ["mental arithmetic", "abacus", "soroban", "education", "math"],
   "author": "",

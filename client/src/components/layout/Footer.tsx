@@ -25,16 +25,10 @@ const Footer: React.FC = () => {
           </Typography>
           <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap' }}>
             <MuiLink component={RouterLink} to="/privacy" underline="hover" color="text.secondary">
-              Политика конфиденциальности
-            </MuiLink>
-            <MuiLink component={RouterLink} to="/data-consent" underline="hover" color="text.secondary">
-              Согласие на обработку данных
+              Правила обработки персональных данных и политика конфиденциальности
             </MuiLink>
             <MuiLink component={RouterLink} to="/user-agreement" underline="hover" color="text.secondary">
               Пользовательское соглашение
-            </MuiLink>
-            <MuiLink component={RouterLink} to="/public-offer" underline="hover" color="text.secondary">
-              Публичная оферта
             </MuiLink>
           </Stack>
         </Stack>

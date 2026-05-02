@@ -5,6 +5,12 @@
 - как проверять синхронизацию `локалка <-> GitHub <-> сервер`;
 - что делать при типовых сбоях портов/запуска.
 
+Коротко:
+- основная ветка: `main`;
+- основной удалённый репозиторий: `github-new`;
+- сервер синхронизируется `rsync` в `/opt/mikael` (не через `git pull`).
+- рекомендуемая версия Node.js: `20.x` (см. `.nvmrc`).
+
 ## 1) Рекомендуемый локальный запуск (стабильный)
 
 Режим: один процесс, один порт (`3000`), фронтенд и API отдаются через Express.
@@ -28,6 +34,13 @@ curl -s -o /dev/null -w "api:%{http_code}\n" http://127.0.0.1:3000/api/health
 
 Режим: фронтенд `3000`, backend `5000` (по умолчанию проекта).
 
+Перед запуском (желательно):
+
+```bash
+cd "/Users/arturartinov/Desktop/Mikael-final 777"
+nvm use
+```
+
 ```bash
 cd "/Users/arturartinov/Desktop/Mikael-final 777"
 npm run dev:mem
@@ -42,6 +55,13 @@ lsof -nP -iTCP:5000 -sTCP:LISTEN
 Или освобождаем порт, или запускаем backend на другом порту и настраиваем `client/package.json` (`proxy`) под этот порт.
 
 ## 3) Проверка синхронизации локалки и GitHub
+
+Быстро (автоматически):
+
+```bash
+cd "/Users/arturartinov/Desktop/Mikael-final 777"
+npm run sync:check
+```
 
 ```bash
 cd "/Users/arturartinov/Desktop/Mikael-final 777"
@@ -80,6 +100,15 @@ rsync -azn --delete --itemize-changes \
 Если вывод пустой/минимальный (`.d..t.... ./`), сервер и локалка синхронны.
 
 ## 5) Применение синхронизации на сервер
+
+Каноничный сценарий в 1 команду (main -> github-new -> server):
+
+```bash
+cd "/Users/arturartinov/Desktop/Mikael-final 777"
+npm run sync:apply
+```
+
+Ручной вариант:
 
 ```bash
 cd "/Users/arturartinov/Desktop/Mikael-final 777"
