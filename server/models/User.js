@@ -197,6 +197,30 @@ const userSchema = new mongoose.Schema({
       default: 'medium',
       enum: ['small', 'medium', 'large']
     }
+  },
+  // Статус платного доступа
+  subscription: {
+    status: {
+      type: String,
+      enum: ['demo', 'active', 'expired', 'canceled'],
+      default: 'demo'
+    },
+    planMonths: {
+      type: Number,
+      default: null
+    },
+    paidUntil: {
+      type: Date,
+      default: null
+    },
+    lastPaymentAt: {
+      type: Date,
+      default: null
+    },
+    lastPaymentId: {
+      type: String,
+      default: null
+    }
   }
 }, {
   timestamps: true

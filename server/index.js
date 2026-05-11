@@ -23,6 +23,7 @@ const userRoutes = require('./routes/user');
 const trainingRoutes = require('./routes/training');
 const adminRoutes = require('./routes/admin');
 const publicRoutes = require('./routes/public');
+const paymentRoutes = require('./routes/payments');
 const User = require('./models/User');
 
 const app = express();
@@ -105,6 +106,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/training', trainingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/public', publicRoutes);
+app.use('/api/payments', paymentRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

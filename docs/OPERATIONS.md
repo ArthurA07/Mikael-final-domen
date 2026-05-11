@@ -46,6 +46,23 @@
     ssh -i "$HOME/.ssh/cursor_deploy_ed25519" root@81.31.247.70 "cd /opt/mikael && ./scripts/deploy_on_server.sh"
     ```
 
+## ЮKassa (боевой режим)
+
+Минимальные переменные в `server/.env`:
+
+```env
+YOOKASSA_SHOP_ID=...
+YOOKASSA_SECRET_KEY=...
+YOOKASSA_TAX_SYSTEM_CODE=2
+YOOKASSA_VAT_CODE=1
+PUBLIC_APP_URL=https://swift-mind.ru
+```
+
+Webhook в кабинете ЮKassa:
+
+- URL: `https://swift-mind.ru/api/payments/yookassa/webhook`
+- События: `payment.succeeded`, `payment.canceled`
+
 ## Частые проблемы и решения
 
 - `ENOTEMPTY` в `client/node_modules/.cache/babel-loader` на сервере:
