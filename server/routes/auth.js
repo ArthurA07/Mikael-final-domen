@@ -338,12 +338,20 @@ router.post('/forgot-password', [
     console.log('[auth] reset-password link:', resetUrl);
 
     // Транспорт для почты (минимальный SMTP, можно заменить на любой сервис)
-    const port = parseInt(process.env.SMTP_PORT || '587', 10);
+    const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+    const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+    const smtpSecure = smtpPort === 465;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpAuth = smtpUser && smtpPass ? { user: smtpUser, pass: smtpPass } : undefined;
+    const mailStrict = (process.env.MAIL_STRICT || (process.env.NODE_ENV === 'production' ? 'true' : 'false')).toLowerCase() === 'true';
+    const smtpVerify = (process.env.SMTP_VERIFY || 'false').toLowerCase() === 'true';
+
     const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port,
-      secure: port === 465,
-      auth: process.env.SMTP_USER && process.env.SMTP_PASS ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpSecure,
+      auth: smtpAuth,
     });
     const mailOptions = {
       from: process.env.SMTP_FROM || 'no-reply@mikael-final.app',
@@ -352,7 +360,43 @@ router.post('/forgot-password', [
       text: `Здравствуйте! Для сброса пароля перейдите по ссылке: ${resetUrl}\n\nСсылка действует 15 минут. Если вы не запрашивали сброс — просто игнорируйте это письмо.`,
       html: buildResetEmailHtml(user?.name, resetUrl, 15),
     };
-    try { await transporter.sendMail(mailOptions); } catch (e) { console.warn('Mail send warning', e?.message); }
+    try {
+      if (smtpVerify) {
+        await transporter.verify();
+      }
+      const info = await transporter.sendMail(mailOptions);
+      console.info('[mail] reset-password sent', {
+        messageId: info?.messageId,
+        accepted: info?.accepted,
+        rejected: info?.rejected,
+        response: info?.response,
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        authEnabled: Boolean(smtpAuth),
+      });
+    } catch (e) {
+      console.error('[mail] reset-password failed', {
+        message: e?.message,
+        code: e?.code,
+        command: e?.command,
+        responseCode: e?.responseCode,
+        response: e?.response,
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        authEnabled: Boolean(smtpAuth),
+        to: email,
+        from: mailOptions.from,
+      });
+      if (mailStrict) {
+        return res.status(502).json({
+          error: {
+            message: 'Не удалось отправить письмо. Попробуйте позже.'
+          }
+        });
+      }
+    }
 
     res.json({ success: true, message: 'Если email существует, мы отправили ссылку' });
   } catch (e) {

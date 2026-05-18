@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Box, Paper, TextField, Button, Typography, Stack, Alert } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
 const RegisterPage: React.FC = () => {
   const { register, isLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation() as any;
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -34,7 +35,8 @@ const RegisterPage: React.FC = () => {
     try {
       const ok = await register({ name, email, password });
       if (ok) {
-        navigate('/dashboard', { replace: true });
+        const to = location.state?.from?.pathname || '/dashboard';
+        navigate(to, { replace: true });
       } else {
         setError('Не удалось зарегистрироваться. Проверьте данные.');
       }

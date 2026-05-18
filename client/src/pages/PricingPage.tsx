@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSeo } from '../utils/seo';
 import {
   Container,
@@ -20,26 +20,93 @@ import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
 const tariffRows = [
-  { months: 1, period: '1 месяц', price: '399 рублей' },
+  { months: 1, period: '1 месяц', price: '1 рубль' },
   { months: 3, period: '3 месяца', price: '999 рублей' },
   { months: 6, period: '6 месяцев', price: '1799 рублей' },
   { months: 12, period: '12 месяцев', price: '2999 рублей' },
 ];
 
+type SubscriptionStatus = 'demo' | 'active' | 'expired' | 'canceled';
+
+interface SubscriptionInfo {
+  status?: SubscriptionStatus;
+  planMonths?: number | null;
+  paidUntil?: string | null;
+  lastPaymentAt?: string | null;
+}
+
 const PricingPage: React.FC = () => {
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, token, isLoading } = useAuth();
+  const hasSession = isAuthenticated || Boolean(token);
   const [loadingMonths, setLoadingMonths] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   useSeo({
     title: 'Тарифы — Супер Математика',
     description: 'Выберите подходящий тариф тренажёра ментальной арифметики. Доступ к тренажёрам и абакусу.',
   });
 
+  useEffect(() => {
+    const loadSubscription = async () => {
+      if (!hasSession) {
+        setSubscription(null);
+        return;
+      }
+
+      try {
+        const response = await axios.get('/payments/subscription');
+        setSubscription(response?.data?.data?.subscription || null);
+      } catch {
+        setSubscription(null);
+      }
+    };
+
+    loadSubscription();
+  }, [hasSession]);
+
+  const subscriptionMeta = useMemo(() => {
+    const status = subscription?.status || 'demo';
+    const paidUntilDate = subscription?.paidUntil ? new Date(subscription.paidUntil) : null;
+    const hasFuturePaidUntil = paidUntilDate ? paidUntilDate.getTime() > Date.now() : false;
+    const isActive = status === 'active' && hasFuturePaidUntil;
+
+    if (isActive) {
+      return {
+        severity: 'success' as const,
+        text: `Подписка активна до ${paidUntilDate!.toLocaleDateString('ru-RU')}. Вы можете продлить доступ заранее.`,
+      };
+    }
+
+    if (status === 'expired') {
+      return {
+        severity: 'warning' as const,
+        text: 'Подписка истекла. Выберите тариф для продления доступа.',
+      };
+    }
+
+    if (status === 'canceled') {
+      return {
+        severity: 'warning' as const,
+        text: 'Последний платёж отменён. Выберите тариф для повторной оплаты.',
+      };
+    }
+
+    return {
+      severity: 'info' as const,
+      text: 'У вас пока нет активной подписки. Выберите тариф для оплаты и открытия полного доступа.',
+    };
+  }, [subscription]);
+
   const handleBuy = async (months: number) => {
     setErrorMessage('');
-    if (!isAuthenticated) {
-      navigate('/login');
+    if (!hasSession) {
+      navigate('/login', {
+        state: {
+          from: { pathname: '/pricing' },
+          paymentIntent: { periodMonths: months }
+        }
+      });
       return;
     }
 
@@ -69,6 +136,11 @@ const PricingPage: React.FC = () => {
         <Typography variant="body1" color="text.secondary" paragraph sx={{ mb: 3 }}>
           Выберите подходящий период подписки. Полные условия оплаты и возврата доступны в пользовательском соглашении.
         </Typography>
+        {hasSession && (
+          <Alert severity={subscriptionMeta.severity} sx={{ mb: 2, textAlign: 'left' }}>
+            {subscriptionMeta.text}
+          </Alert>
+        )}
         {errorMessage && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {errorMessage}
@@ -103,10 +175,22 @@ const PricingPage: React.FC = () => {
             </TableBody>
           </Table>
         </TableContainer>
-        <Stack direction="row" spacing={2} justifyContent="center">
-          <Button variant="contained" onClick={() => navigate('/register')}>Зарегистрироваться</Button>
-          <Button variant="outlined" onClick={() => navigate('/login')}>Войти</Button>
-        </Stack>
+        {!isLoading && !hasSession && (
+          <Stack direction="row" spacing={2} justifyContent="center">
+            <Button
+              variant="contained"
+              onClick={() => navigate('/register', { state: { from: { pathname: '/pricing' } } })}
+            >
+              Зарегистрироваться
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={() => navigate('/login', { state: { from: { pathname: '/pricing' } } })}
+            >
+              Войти
+            </Button>
+          </Stack>
+        )}
       </Paper>
     </Container>
   );

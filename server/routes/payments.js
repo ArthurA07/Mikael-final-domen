@@ -8,7 +8,7 @@ const User = require('../models/User');
 const router = express.Router();
 
 const TARIFFS = {
-  1: 399,
+  1: 1,
   3: 999,
   6: 1799,
   12: 2999

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -28,11 +28,18 @@ import {
   Person,
   Login,
   PersonAdd,
-  Logout,
   Dashboard as DashboardIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import axios from 'axios';
+
+type SubscriptionStatus = 'demo' | 'active' | 'expired' | 'canceled';
+
+interface SubscriptionInfo {
+  status?: SubscriptionStatus;
+  paidUntil?: string | null;
+}
 
 const Navbar: React.FC = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -42,6 +49,37 @@ const Navbar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, user, logout } = useAuth();
+  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
+
+  useEffect(() => {
+    const loadSubscription = async () => {
+      if (!isAuthenticated) {
+        setSubscription(null);
+        return;
+      }
+
+      try {
+        const response = await axios.get('/payments/subscription');
+        setSubscription(response?.data?.data?.subscription || null);
+      } catch {
+        setSubscription(null);
+      }
+    };
+
+    loadSubscription();
+  }, [isAuthenticated]);
+
+  const subscriptionStatus = subscription?.status || 'demo';
+  const isSubscriptionActive =
+    subscriptionStatus === 'active' &&
+    (!subscription?.paidUntil || new Date(subscription.paidUntil).getTime() > Date.now());
+  const isDemoAccess = subscriptionStatus === 'demo';
+  const subscriptionBadgeLabel = isSubscriptionActive
+    ? '✨ Подписка активна'
+    : (isDemoAccess ? '🟢 Демо-доступ активен' : '💳 Подписка не активна');
+  const subscriptionMenuLabel = isSubscriptionActive
+    ? '💳 Подписка: активна'
+    : (isDemoAccess ? '🟢 Гостевой режим (демо)' : '💳 Подписка: не активна');
 
   const menuItems = [
     { text: '🏠 Главная', path: '/', icon: <Home />, public: true },
@@ -211,12 +249,14 @@ const Navbar: React.FC = () => {
           borderBottom: '1px solid rgba(0,0,0,0.05)',
         }}
       >
-        <Toolbar sx={{ justifyContent: 'space-between', py: 1 }}>
+        <Toolbar sx={{ py: 1, gap: 1 }}>
           {/* Logo и название */}
           <Box 
             sx={{ 
               display: 'flex', 
               alignItems: 'center', 
+              flex: '1 1 auto',
+              minWidth: 0,
               cursor: 'pointer',
               transition: 'transform 0.3s ease',
               '&:hover': {
@@ -236,16 +276,22 @@ const Navbar: React.FC = () => {
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
                 mr: 1,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: { xs: '56vw', sm: '44vw', md: '32vw', lg: 'none' },
               }}
             >
               🧮 Супер Математика
             </Typography>
             {isAuthenticated && (
               <Chip
-                label="✨ Активен"
+                label={subscriptionBadgeLabel}
                 size="small"
                 sx={{
-                  background: 'linear-gradient(45deg, #4ECDC4, #45B7D1)',
+                  background: isSubscriptionActive
+                    ? 'linear-gradient(45deg, #4ECDC4, #45B7D1)'
+                    : 'linear-gradient(45deg, #f59e0b, #f97316)',
                   color: 'white',
                   fontWeight: 600,
                   fontSize: '0.75rem',
@@ -257,7 +303,7 @@ const Navbar: React.FC = () => {
 
           {/* Десктопное меню */}
           {!isMobile && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, overflow: 'hidden' }}>
               {menuItems
                 .filter(item => item.public || isAuthenticated)
                 .slice(0, 4) // Показываем только первые 4 пункта
@@ -288,7 +334,7 @@ const Navbar: React.FC = () => {
           )}
 
           {/* Правая часть */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
             {!isMobile && (
               <>
                 {isAuthenticated ? (
@@ -431,6 +477,22 @@ const Navbar: React.FC = () => {
           }}
         >
           👤 Мой профиль
+        </MenuItem>
+        <MenuItem 
+          onClick={() => {
+            navigate('/pricing');
+            handleMenuClose();
+          }}
+          sx={{
+            borderRadius: '10px',
+            mx: 1,
+            my: 0.5,
+            '&:hover': {
+              backgroundColor: 'rgba(255,255,255,0.1)',
+            },
+          }}
+        >
+          {subscriptionMenuLabel}
         </MenuItem>
         <MenuItem 
           onClick={() => {

@@ -155,10 +155,6 @@ const TrainerPage: React.FC = () => {
   useEffect(() => {
     const check = async () => {
       try {
-        if (isAuthenticated) {
-          setGuestAllowed(true);
-          return;
-        }
         const res = await axios.post('/public/free-access');
         if (res.data?.success && res.data?.data?.allowed) {
           setGuestAllowed(true);
@@ -184,9 +180,264 @@ const TrainerPage: React.FC = () => {
   // Флаги для защиты от двойной отправки/сохранения
   const submittingAnswerRef = useRef(false);
   const sessionSavedRef = useRef(false);
+  const displayViewportRef = useRef<HTMLDivElement | null>(null);
+  const displayContentRef = useRef<HTMLDivElement | null>(null);
+  const debugLoggedKeyRef = useRef<string>('');
+  const [problemPosition, setProblemPosition] = useState<{ key: string; dx: number; dy: number }>({
+    key: '',
+    dx: 0,
+    dy: 0,
+  });
+  const [problemColor, setProblemColor] = useState<{
+    key: string;
+    color: string;
+    contrastRatio: number;
+    applied: boolean;
+  }>({
+    key: '',
+    color: theme.palette.primary.main,
+    contrastRatio: 1,
+    applied: false,
+  });
   
   // Стабильная ссылка на текущие настройки
   const currentSettings = useMemo(() => localSettings, [localSettings]);
+  const currentProblemKey = useMemo(() => {
+    const sessionKey = state.currentSession?.startTime ?? 0;
+    const problemIdx = state.currentSession?.currentProblemIndex ?? -1;
+    const signature = state.currentProblem
+      ? `${state.currentProblem.numbers.join(',')}|${state.currentProblem.ops?.join(',') || state.currentProblem.operation}`
+      : 'none';
+    return `${sessionKey}:${problemIdx}:${signature}`;
+  }, [state.currentSession?.startTime, state.currentSession?.currentProblemIndex, state.currentProblem]);
+
+  const getSafeRandomPosition = useCallback((
+    containerSize: { width: number; height: number },
+    contentSize: { width: number; height: number }
+  ) => {
+    const sidePadding = isMobile ? 12 : 24;
+    const topPadding = isMobile ? 8 : 16;
+    const bottomPadding = isMobile ? 46 : 58;
+
+    const availableWidth = containerSize.width - sidePadding * 2;
+    const availableHeight = containerSize.height - topPadding - bottomPadding;
+    if (availableWidth <= 0 || availableHeight <= 0) return { dx: 0, dy: 0 };
+
+    // Иногда измерение контента может возвращать почти полную ширину контейнера
+    // (из-за особенностей layout). В таком случае используем "эффективный" размер,
+    // чтобы не блокировать рандомизацию позиции.
+    const effectiveContentWidth = Math.min(contentSize.width, availableWidth * 0.65);
+    const effectiveContentHeight = Math.min(contentSize.height, availableHeight * 0.65);
+
+    const maxDx = Math.max(0, (availableWidth - effectiveContentWidth) / 2);
+    const maxDy = Math.max(0, (availableHeight - effectiveContentHeight) / 2);
+    if (maxDx < 8 && maxDy < 8) return { dx: 0, dy: 0 };
+
+    const pickShift = (maxShift: number) => {
+      if (maxShift < 8) return 0;
+      const minVisible = Math.min(Math.max(isMobile ? 10 : 24, maxShift * 0.25), maxShift);
+      const magnitude = minVisible + Math.random() * Math.max(0, maxShift - minVisible);
+      const sign = Math.random() < 0.5 ? -1 : 1;
+      return Math.round(sign * magnitude);
+    };
+
+    const pickVerticalShiftSafe = (maxShift: number) => {
+      if (maxShift < 8) return 0;
+      // Чтобы не наезжать на линию таймера под примером, двигаем по Y только вверх.
+      const minVisible = Math.min(Math.max(isMobile ? 8 : 16, maxShift * 0.2), maxShift);
+      const magnitude = minVisible + Math.random() * Math.max(0, maxShift - minVisible);
+      return -Math.round(magnitude);
+    };
+
+    return {
+      dx: pickShift(maxDx),
+      dy: pickVerticalShiftSafe(maxDy),
+    };
+  }, [isMobile]);
+
+  const recalculateProblemPosition = useCallback(() => {
+    if (!(currentSettings as any).randomPosition || !state.showProblem) {
+      setProblemPosition(prev => (prev.dx === 0 && prev.dy === 0 && prev.key === currentProblemKey)
+        ? prev
+        : { key: currentProblemKey, dx: 0, dy: 0 });
+      return;
+    }
+    const viewportEl = displayViewportRef.current;
+    const contentEl = displayContentRef.current;
+    if (!viewportEl || !contentEl) return;
+
+    const viewportRect = viewportEl.getBoundingClientRect();
+    const contentRect = contentEl.getBoundingClientRect();
+    const next = getSafeRandomPosition(
+      { width: viewportRect.width, height: viewportRect.height },
+      { width: contentRect.width, height: contentRect.height }
+    );
+    setProblemPosition({ key: currentProblemKey, dx: next.dx, dy: next.dy });
+  }, [currentSettings, state.showProblem, currentProblemKey, getSafeRandomPosition]);
+
+  useEffect(() => {
+    if (!(currentSettings as any).randomPosition || !state.showProblem) {
+      setProblemPosition(prev => (prev.dx === 0 && prev.dy === 0 && prev.key === currentProblemKey)
+        ? prev
+        : { key: currentProblemKey, dx: 0, dy: 0 });
+      return;
+    }
+
+    const rafId = requestAnimationFrame(() => {
+      recalculateProblemPosition();
+    });
+
+    return () => cancelAnimationFrame(rafId);
+  }, [currentProblemKey, state.showProblem, currentSettings, recalculateProblemPosition]);
+
+  useEffect(() => {
+    if (!(currentSettings as any).randomPosition || !state.showProblem) return;
+    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => recalculateProblemPosition(), 120);
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [currentSettings, state.showProblem, recalculateProblemPosition]);
+
+  const toRgb = useCallback((input: string): { r: number; g: number; b: number } | null => {
+    const value = (input || '').trim().toLowerCase();
+    if (!value) return null;
+    const hex = value.startsWith('#') ? value.slice(1) : value;
+    if (/^[0-9a-f]{6}$/i.test(hex)) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16),
+        g: parseInt(hex.slice(2, 4), 16),
+        b: parseInt(hex.slice(4, 6), 16),
+      };
+    }
+    if (/^[0-9a-f]{3}$/i.test(hex)) {
+      return {
+        r: parseInt(`${hex[0]}${hex[0]}`, 16),
+        g: parseInt(`${hex[1]}${hex[1]}`, 16),
+        b: parseInt(`${hex[2]}${hex[2]}`, 16),
+      };
+    }
+    const rgbMatch = value.match(/^rgba?\(([^)]+)\)$/);
+    if (!rgbMatch) return null;
+    const parts = rgbMatch[1].split(',').map(part => Number(part.trim()));
+    if (parts.length < 3 || parts.some(v => Number.isNaN(v))) return null;
+    return {
+      r: Math.max(0, Math.min(255, parts[0])),
+      g: Math.max(0, Math.min(255, parts[1])),
+      b: Math.max(0, Math.min(255, parts[2])),
+    };
+  }, []);
+
+  const contrastRatio = useCallback((foreground: string, background: string): number => {
+    const fg = toRgb(foreground);
+    const bg = toRgb(background);
+    if (!fg || !bg) return 1;
+    const channel = (v: number) => {
+      const s = v / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    const luminance = (c: { r: number; g: number; b: number }) => 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
+    const l1 = luminance(fg);
+    const l2 = luminance(bg);
+    const lighter = Math.max(l1, l2);
+    const darker = Math.min(l1, l2);
+    return (lighter + 0.05) / (darker + 0.05);
+  }, [toRgb]);
+
+  const getRandomReadableColor = useCallback((backgroundColor: string, minContrastRatio = 4.5) => {
+    const palette = [
+      '#1E40AF', '#1D4ED8', '#1E3A8A', '#7E22CE', '#6B21A8',
+      '#BE123C', '#B91C1C', '#C2410C', '#0F766E', '#0F766E',
+      '#065F46', '#14532D', '#334155', '#4C1D95',
+    ];
+    const readable = palette
+      .map(color => ({ color, ratio: contrastRatio(color, backgroundColor) }))
+      .filter(entry => entry.ratio >= minContrastRatio);
+
+    const selectedPool = readable.length ? readable : palette.map(color => ({ color, ratio: contrastRatio(color, backgroundColor) }));
+    const selected = selectedPool[Math.floor(Math.random() * selectedPool.length)];
+    return selected || { color: theme.palette.primary.main, ratio: contrastRatio(theme.palette.primary.main, backgroundColor) };
+  }, [contrastRatio, theme.palette.primary.main]);
+
+  useEffect(() => {
+    if (!state.currentProblem) return;
+    const randomColorOn = !!(currentSettings as any).randomColor;
+    const isDigitsMode = currentSettings.displayMode === 'digits';
+    const shouldApply = randomColorOn && isDigitsMode;
+    const backgroundColor = theme.palette.background.paper || '#ffffff';
+
+    if (!shouldApply) {
+      setProblemColor({
+        key: currentProblemKey,
+        color: theme.palette.primary.main,
+        contrastRatio: contrastRatio(theme.palette.primary.main, backgroundColor),
+        applied: false,
+      });
+      return;
+    }
+
+    const picked = getRandomReadableColor(backgroundColor, 4.5);
+    setProblemColor({
+      key: currentProblemKey,
+      color: picked.color,
+      contrastRatio: picked.ratio,
+      applied: true,
+    });
+  }, [
+    currentProblemKey,
+    currentSettings,
+    state.currentProblem,
+    theme.palette.primary.main,
+    theme.palette.background.paper,
+    getRandomReadableColor,
+    contrastRatio,
+  ]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return;
+    if (!state.showProblem || !state.currentProblem) return;
+    if (debugLoggedKeyRef.current === currentProblemKey) return;
+    if (problemPosition.key !== currentProblemKey) return;
+    if (problemColor.key !== currentProblemKey) return;
+
+    const sequential = !!(currentSettings as any).sequentialDisplay;
+    const branch = currentSettings.displayMode === 'abacus'
+      ? (sequential ? 'abacus-sequential' : 'abacus-full')
+      : (sequential ? 'digits-sequential' : 'digits-full');
+    const randomPositionOn = !!(currentSettings as any).randomPosition;
+    const randomColorOn = !!(currentSettings as any).randomColor;
+
+    console.debug('[trainer-display-randomization]', {
+      problemId: currentProblemKey,
+      displayMode: currentSettings.displayMode,
+      lawsMode: currentSettings.lawsMode,
+      operations: currentSettings.operations,
+      range: {
+        min: currentSettings.numberRangeMin ?? 1,
+        max: currentSettings.numberRange,
+      },
+      sequentialDisplay: sequential,
+      randomPosition: {
+        enabled: randomPositionOn,
+        applied: randomPositionOn,
+        selectedPosition: { dx: problemPosition.dx, dy: problemPosition.dy },
+      },
+      randomColor: {
+        enabled: randomColorOn,
+        applied: problemColor.applied,
+        selectedColor: problemColor.color,
+        contrastRatio: Number(problemColor.contrastRatio.toFixed(2)),
+      },
+      renderBranch: branch,
+    });
+
+    debugLoggedKeyRef.current = currentProblemKey;
+  }, [currentProblemKey, currentSettings, state.showProblem, state.currentProblem, problemPosition, problemColor]);
 
   // Инициализация настроек при загрузке
   useEffect(() => {
@@ -244,8 +495,10 @@ const TrainerPage: React.FC = () => {
 
   // Начало тренировки
   const startTraining = useCallback(() => {
-    if (!isAuthenticated && !guestAllowed) {
-      alert('Бесплатный доступ для гостей завершён. Войдите или зарегистрируйтесь, чтобы продолжить без ограничений.');
+    if (!guestAllowed) {
+      alert(isAuthenticated
+        ? 'Нужна активная платная подписка, чтобы продолжить тренировку.'
+        : 'Бесплатный доступ для гостей завершён. Войдите или оформите подписку.');
       return;
     }
     clearCurrentTimeout();
@@ -729,42 +982,15 @@ const TrainerPage: React.FC = () => {
     const isTwoScreens = !!(currentSettings as any).twoScreens;
     const canSubmitCurrentAnswer = Boolean(state.userAnswer && (!isTwoScreens || (state as any).userAnswerB));
 
-    // Визуальные "рандомизации" (позиция/цвет) должны работать и в sequential режиме.
-    // Делаем детерминированно (по индексу примера и шага), чтобы не дёргалось на каждом ререндере.
-    const currentIdx = state.currentSession?.currentProblemIndex || 0;
-    const sequentialIdx = state.sequentialIndex || 0;
+    // Визуальные "рандомизации" (позиция/цвет).
+    // Позиция фиксируется на весь текущий пример и меняется только на новом примере.
     const randomPositionOn = !!(currentSettings as any).randomPosition;
-    const randomColorOn = !!(currentSettings as any).randomColor;
     const fontScale = ((currentSettings as any).fontScale || 1) as number;
+    const activeOffset = randomPositionOn && problemPosition.key === currentProblemKey
+      ? { dx: problemPosition.dx, dy: problemPosition.dy }
+      : { dx: 0, dy: 0 };
+    const activeDigitsColor = problemColor.key === currentProblemKey ? problemColor.color : theme.palette.primary.main;
 
-    const safeColors = [
-      '#1E88E5', // blue
-      '#E53935', // red
-      '#8E24AA', // purple
-      '#43A047', // green
-      '#FB8C00', // orange
-      '#00ACC1', // cyan
-      '#3949AB', // indigo
-      '#6D4C41', // brown
-    ];
-
-    const rand01 = (seed: number) => {
-      const x = Math.sin(seed) * 10000;
-      return x - Math.floor(x);
-    };
-
-    const pickColor = (seed: number) => safeColors[Math.floor(rand01(seed) * safeColors.length) % safeColors.length];
-
-    const getOffset = (seed: number, mode: 'digits' | 'abacus') => {
-      const maxShiftX = isMobile ? 24 : 70;
-      const maxShiftY = isMobile ? 16 : 45;
-      const dx = Math.round((rand01(seed + 11) * 2 - 1) * maxShiftX);
-      let dy = Math.round((rand01(seed + 29) * 2 - 1) * maxShiftY);
-      // В режиме Абакуса не двигаем блок вверх, чтобы не наезжать на заголовок/подписи.
-      if (mode === 'abacus') dy = Math.max(0, dy);
-      return { dx, dy };
-    };
-    
     return (
       <Box sx={{ 
         textAlign: 'center',
@@ -775,7 +1001,7 @@ const TrainerPage: React.FC = () => {
         position: 'relative',
       }}>
         {state.showProblem ? (
-          <Box>
+          <Box ref={displayViewportRef}>
             {currentSettings.displayMode === 'abacus' ? (
               <Box sx={{ mb: 3 }}>
                 <Typography variant="h6" sx={{ mb: 2, textAlign: 'center' }}>
@@ -786,22 +1012,22 @@ const TrainerPage: React.FC = () => {
                   (() => {
                     const idx = state.sequentialIndex || 0;
                     const number = numbers[idx];
-                    const seed = currentIdx * 1000 + idx * 37 + numbers.length * 13;
-                    const { dx, dy } = randomPositionOn ? getOffset(seed, 'abacus') : { dx: 0, dy: 0 };
-                    const opColor = randomColorOn ? pickColor(seed + 3) : theme.palette.primary.main;
                     return (
                       <Box
+                        ref={displayContentRef}
                         sx={{
-                          display: 'flex',
+                          display: 'inline-flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           gap: 2,
-                          transform: randomPositionOn ? `translate(${dx}px, ${dy}px)` : undefined,
+                          width: 'fit-content',
+                          maxWidth: '100%',
+                          transform: randomPositionOn ? `translate(${activeOffset.dx}px, ${activeOffset.dy}px)` : undefined,
                           transformOrigin: 'center',
                         }}
                       >
                         {idx === 0 ? null : (
-                          <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: opColor, userSelect: 'none' }}>
+                          <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: theme.palette.primary.main, userSelect: 'none' }}>
                             {state.currentProblem?.ops && state.currentProblem.ops[idx-1] ? state.currentProblem.ops[idx-1] : operation}
                           </Typography>
                         )}
@@ -814,37 +1040,37 @@ const TrainerPage: React.FC = () => {
                   })()
                 ) : (
                   // обычный режим — все числа
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 2, maxWidth: '1000px', mx: 'auto' }}>
+                  <Box
+                    ref={displayContentRef}
+                    sx={{
+                      display: 'inline-flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 2,
+                      width: 'fit-content',
+                      maxWidth: '1000px',
+                      mx: 'auto',
+                      transform: randomPositionOn ? `translate(${activeOffset.dx}px, ${activeOffset.dy}px)` : undefined,
+                      transformOrigin: 'center',
+                    }}
+                  >
                     {numbers.map((number, index) => (
                       <React.Fragment key={index}>
-                        {(() => {
-                          const seed = currentIdx * 1000 + index * 41 + numbers.length * 17;
-                          const { dx, dy } = randomPositionOn ? getOffset(seed, 'abacus') : { dx: 0, dy: 0 };
-                          return (
-                            <Box
-                              sx={{
-                                flex: '0 1 280px',
-                                minWidth: '200px',
-                                transform: randomPositionOn ? `translate(${dx}px, ${dy}px)` : undefined,
-                                transformOrigin: 'center',
-                              }}
-                            >
+                        <Box
+                          sx={{
+                            flex: '0 1 280px',
+                            minWidth: '200px',
+                          }}
+                        >
                           <Typography variant="body1" sx={{ textAlign: 'center', mb: 1, fontWeight: 'bold' }}>Число {index + 1}</Typography>
                           <TrainerAbacus value={number} showValue={false} />
-                            </Box>
-                          );
-                        })()}
+                        </Box>
                         {index < numbers.length - 1 && (
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', px: 2 }}>
-                            {(() => {
-                              const seed = currentIdx * 1000 + index * 41 + numbers.length * 17 + 7;
-                              const opColor = randomColorOn ? pickColor(seed) : theme.palette.primary.main;
-                              return (
-                                <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: opColor, textShadow: '2px 2px 4px rgba(0,0,0,0.3)', userSelect: 'none' }}>
+                            <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: theme.palette.primary.main, textShadow: '2px 2px 4px rgba(0,0,0,0.3)', userSelect: 'none' }}>
                               {state.currentProblem?.ops && state.currentProblem.ops[index] ? state.currentProblem.ops[index] : operation}
-                                </Typography>
-                              );
-                            })()}
+                            </Typography>
                           </Box>
                         )}
                       </React.Fragment>
@@ -870,48 +1096,62 @@ const TrainerPage: React.FC = () => {
                       const opFromSeq = state.currentProblem?.ops?.[idx - 1];
                       return `${opFromSeq || operation} ${num}`;
                     })();
-                    const seed = currentIdx * 1000 + idx * 37 + numbers.length * 13;
-                    const { dx, dy } = randomPositionOn ? getOffset(seed, 'digits') : { dx: 0, dy: 0 };
-                    const color = randomColorOn ? pickColor(seed) : theme.palette.primary.main;
-                    const translate = randomPositionOn ? ` translate(${dx}px, ${dy}px)` : '';
                     return (
-                      <Typography
-                        key={idx}
-                        variant="h2"
+                      <Box
+                        ref={displayContentRef}
                         sx={{
-                          fontWeight: 'bold',
-                          color,
-                          transform: `scale(${fontScale * dynScale})${translate}`,
+                          display: 'inline-block',
+                          width: 'fit-content',
+                          maxWidth: '100%',
+                          transform: randomPositionOn ? `translate(${activeOffset.dx}px, ${activeOffset.dy}px)` : undefined,
+                          transformOrigin: 'center',
                         }}
                       >
-                        {text}
-                      </Typography>
+                        <Typography
+                          key={idx}
+                          variant="h2"
+                          sx={{
+                            fontWeight: 'bold',
+                            color: activeDigitsColor,
+                            transform: `scale(${fontScale * dynScale})`,
+                          }}
+                        >
+                          {text}
+                        </Typography>
+                      </Box>
                     );
                   }
                   // обычный режим — вся строка
-                  const seed = currentIdx * 1000 + numbers.length * 19;
-                  const { dx, dy } = randomPositionOn ? getOffset(seed, 'digits') : { dx: 0, dy: 0 };
-                  const color = randomColorOn ? pickColor(seed) : theme.palette.primary.main;
-                  const translate = randomPositionOn ? ` translate(${dx}px, ${dy}px)` : '';
                   return (
-                    <Typography
-                      variant="h2"
+                    <Box
+                      ref={displayContentRef}
                       sx={{
-                        fontWeight: 'bold',
-                        color,
-                        transform: `scale(${fontScale * dynScale})${translate}`,
+                        display: 'inline-block',
+                        width: 'fit-content',
+                        maxWidth: '100%',
+                        transform: randomPositionOn ? `translate(${activeOffset.dx}px, ${activeOffset.dy}px)` : undefined,
+                        transformOrigin: 'center',
                       }}
                     >
-                      {(() => {
-                        const ops = state.currentProblem?.ops;
-                        if (ops && ops.length === numbers.length - 1) {
-                          let s = `${numbers[0]}`;
-                          for (let i = 1; i < numbers.length; i++) s += ` ${ops[i-1]} ${numbers[i]}`;
-                          return s;
-                        }
-                        return numbers.join(` ${operation} `);
-                      })()}
-                    </Typography>
+                      <Typography
+                        variant="h2"
+                        sx={{
+                          fontWeight: 'bold',
+                          color: activeDigitsColor,
+                          transform: `scale(${fontScale * dynScale})`,
+                        }}
+                      >
+                        {(() => {
+                          const ops = state.currentProblem?.ops;
+                          if (ops && ops.length === numbers.length - 1) {
+                            let s = `${numbers[0]}`;
+                            for (let i = 1; i < numbers.length; i++) s += ` ${ops[i-1]} ${numbers[i]}`;
+                            return s;
+                          }
+                          return numbers.join(` ${operation} `);
+                        })()}
+                      </Typography>
+                    </Box>
                   );
                 })()}
               </Box>
@@ -1604,20 +1844,26 @@ const TrainerPage: React.FC = () => {
     );
   }
 
-  if (!isAuthenticated && !guestAllowed) {
+  if (!guestAllowed) {
     return (
       <Box sx={{ p: 3, maxWidth: '800px', mx: 'auto' }}>
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="h5" gutterBottom>
-            Бесплатный доступ к тренажёру уже использован
+            {isAuthenticated ? 'Тренажёр доступен только с активной подпиской' : 'Бесплатный доступ к тренажёру уже использован'}
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-            Войдите в аккаунт или зарегистрируйтесь, чтобы продолжить занятия без ограничений.
+            {isAuthenticated
+              ? 'Оформите или продлите подписку, чтобы продолжить занятия в тренажёре и абакусе.'
+              : 'Войдите в аккаунт или оформите подписку, чтобы продолжить занятия.'}
           </Typography>
-          <Stack direction="row" spacing={2} justifyContent="center">
-            <Button variant="contained" href="/login">Войти</Button>
-            <Button variant="outlined" href="/register">Зарегистрироваться</Button>
-          </Stack>
+          {isAuthenticated ? (
+            <Button variant="contained" href="/pricing">Перейти к тарифам</Button>
+          ) : (
+            <Stack direction="row" spacing={2} justifyContent="center">
+              <Button variant="contained" href="/login">Войти</Button>
+              <Button variant="outlined" href="/pricing">Тарифы</Button>
+            </Stack>
+          )}
         </Paper>
       </Box>
     );

@@ -24,6 +24,226 @@ export interface Problem {
   correctAnswer: number;
   // Необязательно: последовательность операций между числами (для смешанных + и -)
   ops?: Operation[]; // длина = numbers.length - 1; используются только '+' | '-'
+  // Единая пошаговая классификация для режима "Законы на 10"
+  law10Classifications?: Law10StepClassification[];
+  // Единая пошаговая классификация для режима "Законы на 5"
+  law5Classifications?: Law5StepClassification[];
+}
+
+export type Law5PartType =
+  | 'law5_plus'
+  | 'law5_minus'
+  | 'direct'
+  | 'forbidden_carry'
+  | 'forbidden_borrow'
+  | 'invalid';
+
+export interface Law5StepPart {
+  place: number;
+  currentDigit: number;
+  operandDigit: number;
+  type: Law5PartType;
+}
+
+export interface Law5StepClassification {
+  okForLaw5Mode: boolean;
+  hasLaw5: boolean;
+  hasForbiddenCarryOrBorrow: boolean;
+  parts: Law5StepPart[];
+}
+
+export type Law10PartType = 'law10_plus' | 'law10_minus' | 'direct' | 'invalid';
+
+export interface Law10StepPart {
+  place: number;
+  currentDigit: number;
+  operandDigit: number;
+  type: Law10PartType;
+}
+
+export interface Law10StepClassification {
+  okForLaw10Mode: boolean;
+  hasLaw10: boolean;
+  hasCarry: boolean;
+  hasBorrow: boolean;
+  hasInvalid: boolean;
+  parts: Law10StepPart[];
+}
+
+function digitAt(num: number, place: number): number {
+  return Math.floor(Math.abs(num) / place) % 10;
+}
+
+function parseSinglePlaceDelta(signedDelta: number, maxK: number): { place: number; k: number; sign: 1 | -1 } | null {
+  const delta = Math.trunc(signedDelta);
+  if (!Number.isFinite(delta) || delta === 0) return null;
+
+  const sign: 1 | -1 = delta > 0 ? 1 : -1;
+  const absDelta = Math.abs(delta);
+  let place = 1;
+  while (absDelta % (place * 10) === 0) place *= 10;
+
+  const k = absDelta / place;
+  if (!Number.isInteger(k) || k < 1 || k > maxK) return null;
+  return { place, k, sign };
+}
+
+export function getDigitAtPlace(value: number, place: number): number {
+  return digitAt(value, place);
+}
+
+export function isLawOfFiveAddition(digit: number, k: number): boolean {
+  return digit < 5 && digit + k >= 5 && digit + k <= 9;
+}
+
+export function isLawOfFiveSubtraction(digit: number, k: number): boolean {
+  return digit >= 5 && digit - k < 5 && digit - k >= 0;
+}
+
+export function isValidLawOfFiveOperation(currentValue: number, signedDelta: number): boolean {
+  const parsed = parseSinglePlaceDelta(signedDelta, 4);
+  if (!parsed || !Number.isFinite(currentValue) || currentValue < 0) return false;
+
+  const { place, k, sign } = parsed;
+  const digit = getDigitAtPlace(currentValue, place);
+  if (sign > 0) return isLawOfFiveAddition(digit, k);
+  return isLawOfFiveSubtraction(digit, k);
+}
+
+export function isLawOfTenAddition(digit: number, k: number): boolean {
+  return digit >= 1 && digit <= 9 && k >= 1 && k <= 9 && digit + k >= 10;
+}
+
+export function isLawOfTenSubtraction(digit: number, k: number): boolean {
+  return digit >= 0 && digit <= 9 && k >= 1 && k <= 9 && digit < k;
+}
+
+export function classifyLaw10Step(
+  currentValue: number,
+  operation: '+' | '-',
+  operand: number
+): Law10StepClassification {
+  const signedDelta = operation === '+' ? operand : -operand;
+  const parsed = parseSinglePlaceDelta(signedDelta, 9);
+  if (!parsed || !Number.isFinite(currentValue) || currentValue < 0 || !Number.isFinite(operand) || operand <= 0) {
+    return {
+      okForLaw10Mode: false,
+      hasLaw10: false,
+      hasCarry: false,
+      hasBorrow: false,
+      hasInvalid: true,
+      parts: [{
+        place: 1,
+        currentDigit: getDigitAtPlace(currentValue, 1),
+        operandDigit: Math.abs(Math.trunc(operand)) % 10,
+        type: 'invalid',
+      }],
+    };
+  }
+
+  const { place, k, sign } = parsed;
+  const currentDigit = getDigitAtPlace(currentValue, place);
+  const nextValue = currentValue + signedDelta;
+  if (nextValue < 0) {
+    return {
+      okForLaw10Mode: false,
+      hasLaw10: false,
+      hasCarry: false,
+      hasBorrow: false,
+      hasInvalid: true,
+      parts: [{ place, currentDigit, operandDigit: k, type: 'invalid' }],
+    };
+  }
+
+  let type: Law10PartType = 'direct';
+  let hasCarry = false;
+  let hasBorrow = false;
+  if (sign > 0) {
+    if (isLawOfTenAddition(currentDigit, k)) {
+      type = 'law10_plus';
+      hasCarry = true;
+    } else if (currentDigit + k > 9) {
+      type = 'invalid';
+    }
+  } else {
+    if (isLawOfTenSubtraction(currentDigit, k)) {
+      type = 'law10_minus';
+      hasBorrow = true;
+    } else if (currentDigit - k < 0) {
+      type = 'invalid';
+    }
+  }
+
+  const hasLaw10 = type === 'law10_plus' || type === 'law10_minus';
+  const hasInvalid = type === 'invalid';
+  return {
+    okForLaw10Mode: !hasInvalid,
+    hasLaw10,
+    hasCarry,
+    hasBorrow,
+    hasInvalid,
+    parts: [{ place, currentDigit, operandDigit: k, type }],
+  };
+}
+
+export function isValidLawOfTenOperation(currentValue: number, signedDelta: number): boolean {
+  const operation: '+' | '-' = signedDelta >= 0 ? '+' : '-';
+  return classifyLaw10Step(currentValue, operation, Math.abs(signedDelta)).okForLaw10Mode;
+}
+
+export function classifyLaw5Step(
+  currentValue: number,
+  operation: '+' | '-',
+  operand: number
+): Law5StepClassification {
+  const signedDelta = operation === '+' ? operand : -operand;
+  const parsed = parseSinglePlaceDelta(signedDelta, 4);
+  if (!parsed || !Number.isFinite(currentValue) || currentValue < 0 || !Number.isFinite(operand) || operand <= 0) {
+    return {
+      okForLaw5Mode: false,
+      hasLaw5: false,
+      hasForbiddenCarryOrBorrow: false,
+      parts: [{
+        place: 1,
+        currentDigit: getDigitAtPlace(currentValue, 1),
+        operandDigit: Math.abs(Math.trunc(operand)) % 10,
+        type: 'invalid',
+      }],
+    };
+  }
+
+  const { place, k, sign } = parsed;
+  const currentDigit = getDigitAtPlace(currentValue, place);
+  let type: Law5PartType = 'invalid';
+
+  if (sign > 0) {
+    const nextDigit = currentDigit + k;
+    if (nextDigit >= 10) {
+      type = 'forbidden_carry';
+    } else if (isLawOfFiveAddition(currentDigit, k)) {
+      type = 'law5_plus';
+    } else {
+      type = 'direct';
+    }
+  } else {
+    const nextDigit = currentDigit - k;
+    if (nextDigit < 0) {
+      type = 'forbidden_borrow';
+    } else if (isLawOfFiveSubtraction(currentDigit, k)) {
+      type = 'law5_minus';
+    } else {
+      type = 'direct';
+    }
+  }
+
+  const hasLaw5 = type === 'law5_plus' || type === 'law5_minus';
+  const hasForbiddenCarryOrBorrow = type === 'forbidden_carry' || type === 'forbidden_borrow';
+  return {
+    okForLaw5Mode: hasLaw5,
+    hasLaw5,
+    hasForbiddenCarryOrBorrow,
+    parts: [{ place, currentDigit, operandDigit: k, type }],
+  };
 }
 
 function randomIntInclusive(max: number, min = 1): number {
@@ -90,6 +310,546 @@ export function generateProblemFactory(settings: GeneratorSettings) {
     return [a, b];
   }
 
+  function buildLaw5Ops(totalSteps: number): ('+' | '-')[] {
+    const opPool = cfg.operations.filter((o): o is '+' | '-' => o === '+' || o === '-');
+    if (opPool.length === 0) return Array.from({ length: totalSteps }, () => '+');
+
+    if (opPool.length === 1) return Array.from({ length: totalSteps }, () => opPool[0]);
+
+    if (totalSteps === 1) return [Math.random() < 0.5 ? '+' : '-'];
+    if (totalSteps === 2) return Math.random() < 0.5 ? ['+', '-'] : ['-', '+'];
+
+    const result: ('+' | '-')[] = [];
+    for (let i = 0; i < totalSteps; i++) {
+      if (i === 0) {
+        result.push(Math.random() < 0.5 ? '+' : '-');
+      } else {
+        const prev = result[i - 1];
+        result.push(Math.random() < 0.7 ? (prev === '+' ? '-' : '+') : prev);
+      }
+    }
+    if (!result.includes('+')) result[0] = '+';
+    if (!result.includes('-')) result[result.length - 1] = '-';
+    return result;
+  }
+
+  function getLaw5Candidates(
+    currentValue: number,
+    operation: '+' | '-',
+    places: number[],
+    maxValue: number
+  ): number[] {
+    const candidates: number[] = [];
+    for (const place of places) {
+      for (let k = 1; k <= 4; k++) {
+        const absDelta = k * place;
+        if (absDelta > maxValue) continue;
+        const signedDelta = operation === '+' ? absDelta : -absDelta;
+        if (!isValidLawOfFiveOperation(currentValue, signedDelta)) continue;
+        if (currentValue + signedDelta < 0) continue;
+        candidates.push(absDelta);
+      }
+    }
+    return candidates;
+  }
+
+  function getPlaceFromOperand(operand: number): number {
+    let place = 1;
+    while (operand % (place * 10) === 0) place *= 10;
+    return place;
+  }
+
+  function maybeLogLaw5Debug(problem: Problem, range: number, classifications: Law5StepClassification[]) {
+    if (process.env.NODE_ENV !== 'development') return;
+
+    let current = problem.numbers[0];
+    const steps = problem.numbers.slice(1).map((operand, index) => {
+      const op = problem.ops?.[index] || problem.operation;
+      const result = op === '+' ? current + operand : current - operand;
+      const entry = {
+        currentValue: current,
+        operation: op,
+        operand,
+        result,
+        classification: classifications[index],
+      };
+      current = result;
+      return entry;
+    });
+
+    console.debug('[law5-generator]', {
+      expression: problem.numbers.reduce((expr, number, index) => {
+        if (index === 0) return String(number);
+        return `${expr} ${problem.ops?.[index - 1] || problem.operation} ${number}`;
+      }, ''),
+      range,
+      lawsMode: cfg.lawsMode,
+      start: problem.numbers[0],
+      steps,
+      correctAnswer: problem.correctAnswer,
+    });
+  }
+
+  function maybeLogCombinedDebug(
+    problem: Problem,
+    range: number,
+    law5Classifications: Law5StepClassification[],
+    law10Classifications: Law10StepClassification[]
+  ) {
+    if (process.env.NODE_ENV !== 'development') return;
+
+    let current = problem.numbers[0];
+    let hasLaw5 = false;
+    let hasLaw10 = false;
+    const steps = problem.numbers.slice(1).map((operand, index) => {
+      const op = problem.ops?.[index] || problem.operation;
+      const result = op === '+' ? current + operand : current - operand;
+      const law5 = law5Classifications[index];
+      const law10 = law10Classifications[index];
+      const stepType = law5?.hasLaw5 ? 'law5' : (law10?.hasLaw10 ? 'law10' : (law10?.hasInvalid ? 'invalid' : 'direct'));
+      hasLaw5 = hasLaw5 || !!law5?.hasLaw5;
+      hasLaw10 = hasLaw10 || !!law10?.hasLaw10;
+      const entry = {
+        currentValue: current,
+        operation: op,
+        operand,
+        result,
+        law5,
+        law10,
+        stepType,
+      };
+      current = result;
+      return entry;
+    });
+
+    console.debug('[laws-both-generator]', {
+      expression: problem.numbers.reduce((expr, number, index) => {
+        if (index === 0) return String(number);
+        return `${expr} ${problem.ops?.[index - 1] || problem.operation} ${number}`;
+      }, ''),
+      range,
+      lawsMode: cfg.lawsMode,
+      start: problem.numbers[0],
+      steps,
+      hasLaw5,
+      hasLaw10,
+      correctAnswer: problem.correctAnswer,
+    });
+  }
+
+  function tryGenerateLaw5Problem(
+    maxValue: number,
+    minValue: number,
+    effectiveNumbersCount: number
+  ): Problem | null {
+    const totalSteps = effectiveNumbersCount - 1;
+    const places = getAvailablePlaces(maxValue);
+    const maxAttempts = 400;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const numbers: number[] = [];
+      const opsSequence = buildLaw5Ops(totalSteps);
+      const classifications: Law5StepClassification[] = [];
+
+      let current = randomIntInclusive(maxValue, minValue);
+      let ok = true;
+      let prevSignedDelta: number | null = null;
+      let prevPlace: number | null = null;
+      numbers.push(current);
+
+      for (let stepIndex = 0; stepIndex < totalSteps; stepIndex++) {
+        const op = opsSequence[stepIndex];
+        const candidates = getLaw5Candidates(current, op, places, maxValue);
+        if (!candidates.length) {
+          ok = false;
+          break;
+        }
+
+        const filtered = candidates.filter((candidate) => {
+          if (prevSignedDelta === null) return true;
+          const signed = op === '+' ? candidate : -candidate;
+          const place = getPlaceFromOperand(candidate);
+          const repeatsSameDelta = signed === prevSignedDelta;
+          const immediateCancel = signed === -prevSignedDelta;
+          const repeatsSamePlace = place === prevPlace;
+          return !repeatsSameDelta && !immediateCancel && !repeatsSamePlace;
+        });
+        const operand = pickRandom(filtered.length ? filtered : candidates);
+        const classification = classifyLaw5Step(current, op as '+' | '-', operand);
+        const signedDelta = op === '+' ? operand : -operand;
+        const nextValue = current + signedDelta;
+        if (!classification.okForLaw5Mode || !classification.hasLaw5 || nextValue < 0) {
+          ok = false;
+          break;
+        }
+
+        numbers.push(operand);
+        classifications.push(classification);
+        current = nextValue;
+        prevSignedDelta = signedDelta;
+        prevPlace = classification.parts[0]?.place || getPlaceFromOperand(operand);
+      }
+
+      if (!ok) continue;
+
+      const correctAnswer = numbers.slice(1).reduce((acc, number, index) => (
+        opsSequence[index] === '+' ? acc + number : acc - number
+      ), numbers[0]);
+      const problem: Problem = {
+        numbers,
+        operation: '+',
+        correctAnswer,
+        ops: opsSequence.map(op => (op === '+' || op === '-' ? op : '+')),
+      };
+      maybeLogLaw5Debug(problem, maxValue, classifications);
+      return problem;
+    }
+
+    return null;
+  }
+
+  function buildLaw10Ops(totalSteps: number): ('+' | '-')[] {
+    const opPool = cfg.operations.filter((o): o is '+' | '-' => o === '+' || o === '-');
+    if (opPool.length === 0) return Array.from({ length: totalSteps }, () => '+');
+    if (opPool.length === 1) {
+      const single = opPool[0];
+      const result = Array.from({ length: totalSteps }, () => single);
+      // В длинных примерах для режима только "-" допускаем редкие "+" как прямые шаги,
+      // чтобы не "упереться" в ноль и сохранить длину цепочки.
+      if (single === '-' && totalSteps > 2) {
+        const helperPlusCount = Math.max(1, Math.floor(totalSteps / 3));
+        for (let i = 0; i < helperPlusCount; i++) {
+          const idx = Math.min(totalSteps - 1, 1 + i * 3);
+          result[idx] = '+';
+        }
+      }
+      return result;
+    }
+
+    if (totalSteps === 1) return [Math.random() < 0.5 ? '+' : '-'];
+    if (totalSteps === 2) return Math.random() < 0.5 ? ['+', '-'] : ['-', '+'];
+
+    const result: ('+' | '-')[] = [];
+    for (let i = 0; i < totalSteps; i++) {
+      if (i === 0) {
+        result.push(Math.random() < 0.5 ? '+' : '-');
+      } else {
+        const prev = result[i - 1];
+        result.push(Math.random() < 0.65 ? (prev === '+' ? '-' : '+') : prev);
+      }
+    }
+    if (!result.includes('+')) result[0] = '+';
+    if (!result.includes('-')) result[result.length - 1] = '-';
+    return result;
+  }
+
+  function getLaw10Candidates(
+    currentValue: number,
+    operation: '+' | '-',
+    places: number[],
+    maxValue: number,
+    kind: 'formula' | 'direct'
+  ): number[] {
+    const candidates: number[] = [];
+    for (const place of places) {
+      const currentDigit = getDigitAtPlace(currentValue, place);
+      for (let k = 1; k <= 9; k++) {
+        const absDelta = k * place;
+        if (absDelta > maxValue) continue;
+        const classification = classifyLaw10Step(currentValue, operation, absDelta);
+        if (!classification.okForLaw10Mode) continue;
+        if (kind === 'formula' && !classification.hasLaw10) continue;
+        if (kind === 'direct' && classification.hasLaw10) continue;
+
+        // Для формул на 10 избегаем перекоса только в "комплементы до 10":
+        // чаще добавляем шаги с суммой >= 11.
+        if (kind === 'formula' && operation === '+') {
+          const sum = currentDigit + k;
+          if (sum === 10 && Math.random() < 0.35) continue;
+        }
+
+        candidates.push(absDelta);
+      }
+    }
+    return candidates;
+  }
+
+  function tryGenerateLaw10Problem(
+    maxValue: number,
+    minValue: number,
+    effectiveNumbersCount: number
+  ): Problem | null {
+    const totalSteps = effectiveNumbersCount - 1;
+    const places = getAvailablePlaces(maxValue);
+    const maxAttempts = 600;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const numbers: number[] = [];
+      const opsSequence = buildLaw10Ops(totalSteps);
+      const classifications: Law10StepClassification[] = [];
+      let current = randomIntInclusive(maxValue, minValue);
+      numbers.push(current);
+
+      const minusOnlySingleDigitRange = cfg.operations.length === 1 && cfg.operations[0] === '-' && maxValue < 10;
+      const targetFormulaStepsBase = totalSteps <= 2 ? totalSteps : Math.max(1, Math.floor(totalSteps * 0.6));
+      // В диапазоне 1-9 при операции только "-" формула "закон на 10" недостижима:
+      // старт и операнды однозначные, заём из старшего разряда невозможен.
+      const targetFormulaSteps = minusOnlySingleDigitRange ? 0 : targetFormulaStepsBase;
+      let formulaSteps = 0;
+      let ok = true;
+      let prevSignedDelta: number | null = null;
+      let prevPlace: number | null = null;
+
+      for (let stepIndex = 0; stepIndex < totalSteps; stepIndex++) {
+        const op = opsSequence[stepIndex];
+        const remainingSteps = totalSteps - stepIndex;
+        const mustBeFormula = formulaSteps + remainingSteps <= targetFormulaSteps;
+        const shouldPreferFormula = mustBeFormula || (formulaSteps < targetFormulaSteps && Math.random() < 0.75);
+        const operationIsAuxiliary = cfg.operations.length === 1 && cfg.operations[0] !== op;
+        const allowFormulaForThisOp = !operationIsAuxiliary;
+
+        const formulaCandidates = getLaw10Candidates(current, op, places, maxValue, 'formula');
+        const directCandidates = getLaw10Candidates(current, op, places, maxValue, 'direct');
+
+        let pool: number[] = [];
+        if (allowFormulaForThisOp) {
+          if (shouldPreferFormula && formulaCandidates.length) pool = formulaCandidates;
+          else if (!shouldPreferFormula && directCandidates.length) pool = directCandidates;
+          else pool = formulaCandidates.length ? formulaCandidates : directCandidates;
+        } else {
+          pool = directCandidates;
+        }
+
+        if (!pool.length) {
+          ok = false;
+          break;
+        }
+
+        const filtered = pool.filter((candidate) => {
+          if (prevSignedDelta === null) return true;
+          const signed = op === '+' ? candidate : -candidate;
+          const place = getPlaceFromOperand(candidate);
+          const repeatsSameDelta = signed === prevSignedDelta;
+          const immediateCancel = signed === -prevSignedDelta;
+          const repeatsSamePlace = place === prevPlace;
+          return !repeatsSameDelta && !immediateCancel && !repeatsSamePlace;
+        });
+
+        const operand = pickRandom(filtered.length ? filtered : pool);
+        const classification = classifyLaw10Step(current, op, operand);
+        const signedDelta = op === '+' ? operand : -operand;
+        const nextValue = current + signedDelta;
+        if (!classification.okForLaw10Mode || classification.hasInvalid || nextValue < 0) {
+          ok = false;
+          break;
+        }
+        if (mustBeFormula && allowFormulaForThisOp && !classification.hasLaw10) {
+          ok = false;
+          break;
+        }
+        if (operationIsAuxiliary && classification.hasLaw10) {
+          ok = false;
+          break;
+        }
+
+        numbers.push(operand);
+        classifications.push(classification);
+        if (classification.hasLaw10) formulaSteps += 1;
+        current = nextValue;
+        prevSignedDelta = signedDelta;
+        prevPlace = classification.parts[0]?.place || getPlaceFromOperand(operand);
+      }
+
+      if (!ok || formulaSteps < targetFormulaSteps) continue;
+      if (opsSequence.includes('+') && opsSequence.includes('-') && totalSteps >= 2) {
+        const plusCount = opsSequence.filter(op => op === '+').length;
+        const minusCount = opsSequence.filter(op => op === '-').length;
+        if (plusCount === 0 || minusCount === 0) continue;
+      }
+
+      const correctAnswer = numbers.slice(1).reduce((acc, number, index) => (
+        opsSequence[index] === '+' ? acc + number : acc - number
+      ), numbers[0]);
+
+      const problem: Problem = {
+        numbers,
+        operation: '+',
+        correctAnswer,
+        ops: opsSequence.map(op => (op === '+' || op === '-' ? op : '+')),
+        law10Classifications: classifications,
+      };
+      return problem;
+    }
+
+    return null;
+  }
+
+  function buildBothOps(totalSteps: number): ('+' | '-')[] {
+    const opPool = cfg.operations.filter((o): o is '+' | '-' => o === '+' || o === '-');
+    if (opPool.length === 0) return Array.from({ length: totalSteps }, () => '+');
+    if (opPool.length === 1) {
+      const single = opPool[0];
+      const result = Array.from({ length: totalSteps }, () => single);
+      if (single === '-' && totalSteps > 2) {
+        const helperPlusCount = Math.max(1, Math.floor(totalSteps / 3));
+        for (let i = 0; i < helperPlusCount; i++) {
+          const idx = Math.min(totalSteps - 1, 1 + i * 3);
+          result[idx] = '+';
+        }
+      }
+      return result;
+    }
+    return buildLaw10Ops(totalSteps);
+  }
+
+  function getBothModeCandidates(
+    currentValue: number,
+    operation: '+' | '-',
+    places: number[],
+    maxValue: number,
+    kind: 'law5' | 'law10' | 'direct'
+  ): Array<{ operand: number; law5: Law5StepClassification; law10: Law10StepClassification }> {
+    const candidates: Array<{ operand: number; law5: Law5StepClassification; law10: Law10StepClassification }> = [];
+    for (const place of places) {
+      for (let k = 1; k <= 9; k++) {
+        const absDelta = k * place;
+        if (absDelta > maxValue) continue;
+        const law5 = classifyLaw5Step(currentValue, operation, absDelta);
+        const law10 = classifyLaw10Step(currentValue, operation, absDelta);
+        const nextValue = operation === '+' ? currentValue + absDelta : currentValue - absDelta;
+        if (nextValue < 0 || !law10.okForLaw10Mode || law10.hasInvalid) continue;
+
+        const isLaw5 = law5.hasLaw5;
+        const isLaw10 = law10.hasLaw10;
+        if (kind === 'law5' && !isLaw5) continue;
+        if (kind === 'law10' && !isLaw10) continue;
+        if (kind === 'direct' && (isLaw5 || isLaw10)) continue;
+        candidates.push({ operand: absDelta, law5, law10 });
+      }
+    }
+    return candidates;
+  }
+
+  function tryGenerateBothLawsProblem(
+    maxValue: number,
+    minValue: number,
+    effectiveNumbersCount: number
+  ): Problem | null {
+    const totalSteps = effectiveNumbersCount - 1;
+    const places = getAvailablePlaces(maxValue);
+    const maxAttempts = 900;
+    const selectedOps = cfg.operations.filter((o): o is '+' | '-' => o === '+' || o === '-');
+    const minusOnlySingleDigitRange = selectedOps.length === 1 && selectedOps[0] === '-' && maxValue < 10;
+    const mustHaveLaw10 = !minusOnlySingleDigitRange;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const numbers: number[] = [];
+      const opsSequence = buildBothOps(totalSteps);
+      const law5Classifications: Law5StepClassification[] = [];
+      const law10Classifications: Law10StepClassification[] = [];
+      let current = randomIntInclusive(maxValue, minValue);
+      numbers.push(current);
+
+      let hasLaw5 = false;
+      let hasLaw10 = false;
+      let ok = true;
+      let prevSignedDelta: number | null = null;
+      let prevPlace: number | null = null;
+
+      for (let stepIndex = 0; stepIndex < totalSteps; stepIndex++) {
+        const op = opsSequence[stepIndex];
+        const remainingSteps = totalSteps - stepIndex;
+        const needLaw5 = !hasLaw5;
+        const needLaw10 = mustHaveLaw10 && !hasLaw10;
+        const mustPickLaw5Now = needLaw5 && remainingSteps <= (needLaw10 ? 2 : 1);
+        const mustPickLaw10Now = needLaw10 && remainingSteps <= (needLaw5 ? 2 : 1);
+        const operationIsAuxiliary = selectedOps.length === 1 && selectedOps[0] !== op;
+
+        const law5Candidates = operationIsAuxiliary ? [] : getBothModeCandidates(current, op, places, maxValue, 'law5');
+        const law10Candidates = operationIsAuxiliary ? [] : getBothModeCandidates(current, op, places, maxValue, 'law10');
+        const directCandidates = getBothModeCandidates(current, op, places, maxValue, 'direct');
+
+        let pool: Array<{ operand: number; law5: Law5StepClassification; law10: Law10StepClassification }> = [];
+        if (mustPickLaw5Now) {
+          pool = law5Candidates;
+        } else if (mustPickLaw10Now) {
+          pool = law10Candidates;
+        } else if (needLaw5 && needLaw10) {
+          pool = Math.random() < 0.5 ? (law5Candidates.length ? law5Candidates : law10Candidates) : (law10Candidates.length ? law10Candidates : law5Candidates);
+        } else if (needLaw5) {
+          pool = law5Candidates.length ? law5Candidates : directCandidates;
+        } else if (needLaw10) {
+          pool = law10Candidates.length ? law10Candidates : directCandidates;
+        } else {
+          const randomRoll = Math.random();
+          if (randomRoll < 0.4 && law5Candidates.length) pool = law5Candidates;
+          else if (randomRoll < 0.8 && law10Candidates.length) pool = law10Candidates;
+          else pool = directCandidates.length ? directCandidates : (law5Candidates.length ? law5Candidates : law10Candidates);
+        }
+
+        if (!pool.length) {
+          ok = false;
+          break;
+        }
+
+        const filtered = pool.filter((entry) => {
+          if (prevSignedDelta === null) return true;
+          const signed = op === '+' ? entry.operand : -entry.operand;
+          const place = getPlaceFromOperand(entry.operand);
+          const repeatsSameDelta = signed === prevSignedDelta;
+          const immediateCancel = signed === -prevSignedDelta;
+          const repeatsSamePlace = place === prevPlace;
+          return !repeatsSameDelta && !immediateCancel && !repeatsSamePlace;
+        });
+
+        const chosen = pickRandom(filtered.length ? filtered : pool);
+        const signedDelta = op === '+' ? chosen.operand : -chosen.operand;
+        const nextValue = current + signedDelta;
+        if (nextValue < 0 || chosen.law10.hasInvalid) {
+          ok = false;
+          break;
+        }
+        if (operationIsAuxiliary && (chosen.law5.hasLaw5 || chosen.law10.hasLaw10)) {
+          ok = false;
+          break;
+        }
+
+        numbers.push(chosen.operand);
+        law5Classifications.push(chosen.law5);
+        law10Classifications.push(chosen.law10);
+        hasLaw5 = hasLaw5 || chosen.law5.hasLaw5;
+        hasLaw10 = hasLaw10 || chosen.law10.hasLaw10;
+        current = nextValue;
+        prevSignedDelta = signedDelta;
+        prevPlace = chosen.law5.parts[0]?.place || chosen.law10.parts[0]?.place || getPlaceFromOperand(chosen.operand);
+      }
+
+      if (!ok || !hasLaw5 || (mustHaveLaw10 && !hasLaw10)) continue;
+      if (opsSequence.includes('+') && opsSequence.includes('-') && totalSteps >= 2) {
+        const plusCount = opsSequence.filter(op => op === '+').length;
+        const minusCount = opsSequence.filter(op => op === '-').length;
+        if (plusCount === 0 || minusCount === 0) continue;
+      }
+
+      const correctAnswer = numbers.slice(1).reduce((acc, number, index) => (
+        opsSequence[index] === '+' ? acc + number : acc - number
+      ), numbers[0]);
+
+      const problem: Problem = {
+        numbers,
+        operation: '+',
+        correctAnswer,
+        ops: opsSequence.map(op => (op === '+' || op === '-' ? op : '+')),
+        law5Classifications,
+        law10Classifications,
+      };
+      maybeLogCombinedDebug(problem, maxValue, law5Classifications, law10Classifications);
+      return problem;
+    }
+
+    return null;
+  }
+
   function generateLawPairFive(op: Operation, max: number, min = 1): [number, number] {
     // Пары для тренировки «через 5»
     if (op === '+') {
@@ -135,46 +895,15 @@ export function generateProblemFactory(settings: GeneratorSettings) {
     }
   }
 
-  function generateLawPairTen(op: Operation, max: number, min = 1): [number, number] {
-    // Пары-комплементы до 10
-    if (op === '+') {
-      const u1 = randomIntInclusive(9, 1);
-      const units2 = (10 - (u1 % 10)) % 10;
-      const u2 = units2 === 0 ? 0 : units2;
-      let a = makeWithUnits(max, u1 === 10 ? 0 : u1, min);
-      let b = makeWithUnits(max, u2, min);
-      if (Math.random() < 0.5) [a, b] = [b, a];
-      return [a, b];
-    } else {
-      // Для вычитания: обеспечиваем a_units < b_units
-      const uA = randomIntInclusive(8, 0); // 0..8
-      const uB = randomIntInclusive(9, uA + 1); // 1..9 и > uA
-      const maxTens = Math.floor((max - Math.max(uA, uB)) / 10);
-      let tB = randomIntInclusive(maxTens, 0);
-      let tA = randomIntInclusive(maxTens, tB); // tA >= tB
-      let a = tA * 10 + uA;
-      let b = tB * 10 + uB;
-      if (a < b) a = (tB + 1) * 10 + uA;
-      a = Math.min(a, max);
-      b = Math.min(b, Math.min(a, max));
-      a = Math.max(a, min);
-      b = Math.max(b, min);
-      return [a, b];
-    }
-  }
-
   return function generate(): Problem {
     const minValue = cfg.numberRangeMin ?? 1;
     const maxValue = cfg.numberRange;
 
     const numbers: number[] = [];
     let opsSequence: Operation[] | undefined;
-    const lawsOn = cfg.lawsMode && cfg.lawsMode !== 'none';
-    // Выбираем операцию; если законы активны — принудительно '+/-'
+    // Выбираем операцию. Законы применяются только к сложению/вычитанию;
+    // умножение и деление должны оставаться на своей существующей логике.
     let operation: Operation = cfg.operations[Math.floor(Math.random() * cfg.operations.length)];
-    if (lawsOn && (operation === '*' || operation === '/')) {
-      operation = Math.random() < 0.5 ? '+' : '-';
-    }
 
     // ВАЖНО:
     // Ограничение "до 3 чисел" относится только к конкретной задаче с ×/÷,
@@ -182,140 +911,28 @@ export function generateProblemFactory(settings: GeneratorSettings) {
     const isMulOrDiv = operation === '*' || operation === '/';
     const effectiveNumbersCount = isMulOrDiv ? Math.min(cfg.numbersCount, 3) : cfg.numbersCount;
 
-    if (lawsOn && effectiveNumbersCount >= 2 && maxValue >= 1) {
-      // Пытаемся сгенерировать выражение так, чтобы доля формул удовлетворяла требованиям.
-      const attempts = 30;
-      for (let attempt = 0; attempt < attempts; attempt++) {
-        numbers.length = 0;
-        opsSequence = [];
-        const opPool = cfg.operations.filter(o => o === '+' || o === '-');
-        if (opPool.length === 0) opPool.push('+');
-        opsSequence = Array.from({ length: effectiveNumbersCount - 1 }, () => pickRandom(opPool)) as Operation[];
-        // Если разрешены и '+' и '-', обеспечим наличие обоих типов операций
-        if (opPool.includes('+') && opPool.includes('-') && opsSequence.length > 0) {
-          if (!opsSequence.includes('+')) opsSequence[0] = '+';
-          if (!opsSequence.includes('-')) opsSequence[opsSequence.length - 1] = '-';
-        }
-        const totalSteps = opsSequence.length;
-        const requiredFormulaSteps = totalSteps <= 2 ? totalSteps : Math.max(1, Math.floor(totalSteps * 0.6));
-        let leftToMake = requiredFormulaSteps;
-
-        let current = randomIntInclusive(maxValue, minValue);
-        numbers.push(current);
-        const places = getAvailablePlaces(maxValue);
-        let formulaCount = 0;
-
-        for (let i = 0; i < totalSteps; i++) {
-          const op = opsSequence[i];
-          const useLaw: 'five' | 'ten' = (cfg.lawsMode === 'both') ? (Math.random() < 0.5 ? 'five' : 'ten') : (cfg.lawsMode as 'five' | 'ten');
-          let madeFormula = false;
-          // Для законов на 10 иногда предпочитаем старшие разряды (десятки/сотни), чтобы чаще тренировать перенос
-          const preferHigher = useLaw === 'ten' && places.length > 1 && Math.random() < 0.6;
-          const shuffledPlaces = weightedPlacesOrder(places, preferHigher);
-          for (const place of shuffledPlaces) {
-            const d = digitAtPlace(current, place);
-            if (op === '+') {
-              if (useLaw === 'five') {
-                  // Требуем, чтобы сумма единичных цифр стала кратна 5
-                  const r = d % 5; // 0..4
-                  let aUnits = (5 - r) % 5; // 0..4
-                  if (aUnits === 0) aUnits = 5; // используем 5 вместо 0
-                  if (aUnits >= 1 && aUnits <= 5) {
-                    const n = aUnits * place;
-                    // ВАЖНО: maxValue — это ограничение на величину ШАГА/числа, а не на накопленный результат.
-                    // Иначе законы на 10/5 не работают в диапазоне 1–9 (т.к. current+n всегда > 9).
-                    if (n <= maxValue) {
-                      numbers.push(n);
-                      current += n;
-                      madeFormula = true;
-                      break;
-                    }
-                  }
-              } else {
-                // Закон на 10: нужен перенос в выбранном разряде (digit + step >= 10).
-                // ВАЖНО: не ограничиваемся только "комплементом до 10", иначе примеры
-                // становятся шаблонными (9+1, 8+2, ...). Берём шаг из диапазона [need..9].
-                const need = (10 - (d % 10)) % 10; // 0..9
-                // need==0 означает, что в этом разряде перенос не нужен/невозможен для шага 1..9.
-                if (need > 0 && need <= 9) {
-                  const stepDigit = randomIntInclusive(9, need); // гарантирует перенос, добавляет вариативность
-                  const n = stepDigit * place;
-                  if (n <= maxValue) {
-                    numbers.push(n);
-                    current += n;
-                    madeFormula = true;
-                    break;
-                  }
-                }
-              }
-            } else {
-              if (useLaw === 'five') {
-                if (d >= 5) {
-                  const bMin = Math.max(1, d - 4);
-                  const bMax = Math.min(4, d);
-                  if (bMin <= bMax && current - bMin * place >= 0) {
-                    const b = randomIntInclusive(bMax, bMin);
-                    const n = b * place;
-                    numbers.push(n);
-                    current -= n;
-                    madeFormula = true;
-                    break;
-                  }
-                }
-              } else {
-                const bMin = d + 1;
-                if (bMin <= 9) {
-                  const b = randomIntInclusive(9, bMin);
-                  const n = b * place;
-                  if (current - n >= 0) {
-                    numbers.push(n);
-                    current -= n;
-                    madeFormula = true;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-
-          if (madeFormula) {
-            formulaCount += 1;
-            leftToMake = Math.max(0, leftToMake - 1);
-            continue;
-          }
-
-          // Если формула обязательна (в варианте с 1-2 шагами), пробуем другой старт с нуля
-          if (requiredFormulaSteps === totalSteps) {
-            // прерываем и начинаем заново
-            formulaCount = -1;
-            break;
-          }
-
-          // Иначе — делаем нефомульный шаг (маленький, безопасный)
-          const place = pickRandom(places);
-          const a = randomIntInclusive(4, 1);
-          const n = a * place;
-          if (op === '+') {
-            numbers.push(Math.min(n, maxValue));
-            current += Math.min(n, maxValue);
-          } else {
-            const step = Math.min(n, current);
-            numbers.push(step);
-            current -= step;
-          }
-        }
-
-        if (formulaCount === -1) continue; // перегенерация для строгого требования
-        if (formulaCount >= requiredFormulaSteps) {
-          break; // удачный вариант
-        } else {
-          // пробуем заново
-          numbers.length = 0;
-          opsSequence = [];
-          continue;
-        }
+    if (cfg.lawsMode === 'five' && !isMulOrDiv && effectiveNumbersCount >= 2 && maxValue >= 1) {
+      const law5Problem = tryGenerateLaw5Problem(maxValue, minValue, effectiveNumbersCount);
+      if (law5Problem) {
+        return law5Problem;
       }
-    } else {
+    }
+
+    if (cfg.lawsMode === 'ten' && !isMulOrDiv && effectiveNumbersCount >= 2 && maxValue >= 1) {
+      const law10Problem = tryGenerateLaw10Problem(maxValue, minValue, effectiveNumbersCount);
+      if (law10Problem) {
+        return law10Problem;
+      }
+    }
+
+    if (cfg.lawsMode === 'both' && !isMulOrDiv && effectiveNumbersCount >= 2 && maxValue >= 1) {
+      const combinedProblem = tryGenerateBothLawsProblem(maxValue, minValue, effectiveNumbersCount);
+      if (combinedProblem) {
+        return combinedProblem;
+      }
+    }
+
+    if (numbers.length === 0) {
       // Обычный режим (без законов). Поддержим смешанные операции для суммы/разности
       const wantsMixedPlusMinus = effectiveNumbersCount >= 3 && cfg.operations.includes('+') && cfg.operations.includes('-') && !isMulOrDiv;
       if (wantsMixedPlusMinus) {

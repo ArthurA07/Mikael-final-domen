@@ -3,9 +3,11 @@ import { Box, Typography, Container, Paper, CircularProgress, Button } from '@mu
 import InteractiveAbacus from '../../components/abacus/InteractiveAbacus';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 
 const AbacusPage: React.FC = () => {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [checking, setChecking] = useState(true);
   const [allowed, setAllowed] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
@@ -45,12 +47,16 @@ const AbacusPage: React.FC = () => {
       <Container maxWidth="sm" sx={{ py: 6 }}>
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="h5" gutterBottom>
-            Бесплатный доступ к абакусу уже использован
+            {isAuthenticated ? 'Абакус доступен только с активной подпиской' : 'Бесплатный доступ к абакусу уже использован'}
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-            Вы можете оформить доступ в тарифах и продолжить занятия без ограничений.
+            {isAuthenticated
+              ? 'Оформите или продлите подписку, чтобы продолжить занятия.'
+              : 'Вы можете оформить подписку в тарифах и продолжить занятия без ограничений.'}
           </Typography>
-          <Button variant="contained" onClick={() => navigate('/pricing')}>Перейти к тарифам</Button>
+          <Button variant="contained" onClick={() => navigate(isAuthenticated ? '/pricing' : '/login')}>
+            {isAuthenticated ? 'Перейти к тарифам' : 'Войти'}
+          </Button>
         </Paper>
       </Container>
     );

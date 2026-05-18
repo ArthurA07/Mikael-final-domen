@@ -1,11 +1,22 @@
-import React, { useEffect, useState } from 'react';
-import { Box, Typography, Paper, TextField, Button, Stack, Alert, Avatar, Divider, Collapse } from '@mui/material';
-// используем CSS grid вместо MUI Grid, чтобы избежать типовых несовместимостей
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Typography, Paper, TextField, Button, Stack, Alert, Avatar, Collapse, Chip, Tabs, Tab } from '@mui/material';
 import axios from 'axios';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
+
+type SubscriptionStatus = 'demo' | 'active' | 'expired' | 'canceled';
+
+interface SubscriptionInfo {
+  status?: SubscriptionStatus;
+  planMonths?: number | null;
+  paidUntil?: string | null;
+  lastPaymentAt?: string | null;
+}
 
 const ProfilePage: React.FC = () => {
   const { user, updateUser } = useAuth();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState(0);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -51,11 +62,8 @@ const ProfilePage: React.FC = () => {
   const [pwdMsg, setPwdMsg] = useState<string | null>(null);
   const [pwdErr, setPwdErr] = useState<string | null>(null);
   const [pwdOpen, setPwdOpen] = useState(false);
-
-  // Набор готовых детских аватаров (DiceBear, публичные ссылки)
-  const presetAvatars: string[] = Array.from({ length: 20 }).map((_, i) =>
-    `https://api.dicebear.com/7.x/big-smile/svg?seed=kid${i + 1}&radius=50&backgroundType=gradientLinear&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc`
-  );
+  const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   useEffect(() => {
     if (user) {
@@ -65,6 +73,55 @@ const ProfilePage: React.FC = () => {
       // аватар теперь статичный для всех
     }
   }, [user]);
+
+  useEffect(() => {
+    const loadSubscription = async () => {
+      try {
+        setSubscriptionLoading(true);
+        const response = await axios.get('/payments/subscription');
+        setSubscription(response?.data?.data?.subscription || null);
+      } catch {
+        setSubscription(null);
+      } finally {
+        setSubscriptionLoading(false);
+      }
+    };
+
+    loadSubscription();
+  }, []);
+
+  const subscriptionInfo = useMemo(() => {
+    const status = subscription?.status || 'demo';
+    const paidUntil = subscription?.paidUntil ? new Date(subscription.paidUntil) : null;
+    const isActive = status === 'active' && !!paidUntil && paidUntil.getTime() > Date.now();
+
+    if (isActive) {
+      return {
+        severity: 'success' as const,
+        title: 'Подписка активна',
+        text: `Подписка действует до ${paidUntil.toLocaleDateString('ru-RU')}.`,
+      };
+    }
+    if (status === 'expired') {
+      return {
+        severity: 'warning' as const,
+        title: 'Подписка истекла',
+        text: 'Чтобы продолжить обучение, выберите тариф для продления доступа.',
+      };
+    }
+    if (status === 'canceled') {
+      return {
+        severity: 'warning' as const,
+        title: 'Платеж отменен',
+        text: 'Повторите оплату, чтобы активировать доступ.',
+      };
+    }
+    return {
+      severity: 'info' as const,
+      title: 'Пробный статус',
+      text: 'Активируйте подписку, чтобы открыть полный доступ ко всем разделам.',
+    };
+  }, [subscription]);
 
   const onSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,76 +170,137 @@ const ProfilePage: React.FC = () => {
 
   return (
     <Box p={3}>
-      <Typography variant="h4" sx={{ mb: 2 }}>Профиль пользователя</Typography>
-      <Paper sx={{ p: 3, maxWidth: 520 }}>
-        {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        <form onSubmit={onSave}>
-          <Stack spacing={2}>
-            {/* Статичный аватар для всех пользователей */}
-            <Stack direction="row" spacing={2} alignItems="center">
-              <Avatar src={DEFAULT_AVATAR} sx={{ width: 64, height: 64 }} />
-            </Stack>
-          {/* Email (только для чтения) */}
-          <TextField 
-            label="Email" 
-            value={email}
-            InputProps={{ readOnly: true }}
-          />
-            <TextField 
-              label="Имя" 
-              value={name} 
-              onChange={e => setName(e.target.value)} 
-              inputProps={{ minLength: 2, maxLength: 50 }}
-              helperText="От 2 до 50 символов"
-              required
-            />
-            <TextField 
-              label="Телефон" 
-              value={phone} 
-              onChange={e => setPhone(e.target.value)} 
-              placeholder="+7 999 123-45-67"
-              helperText="Формат: +7 999 123-45-67"
-            />
-            <Button type="submit" variant="contained" disabled={saving}>
-              Сохранить
-            </Button>
+      <Paper sx={{ p: 3, mb: 3 }}>
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          alignItems={{ xs: 'flex-start', sm: 'center' }}
+          justifyContent="space-between"
+        >
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Avatar src={DEFAULT_AVATAR} sx={{ width: 72, height: 72 }} />
+            <Box>
+              <Typography variant="h4">Профиль пользователя</Typography>
+              <Typography color="text.secondary">{user?.email}</Typography>
+            </Box>
           </Stack>
-        </form>
+          {!subscriptionLoading && (
+            <Chip
+              label={subscriptionInfo.title}
+              color={subscriptionInfo.severity === 'success' ? 'success' : 'warning'}
+              sx={{ fontWeight: 700 }}
+            />
+          )}
+        </Stack>
+      </Paper>
 
-        {/* Блок выбора аватаров скрыт по запросу */}
+      <Paper sx={{ p: 1.5, mb: 2 }}>
+        <Tabs value={activeTab} onChange={(_, value) => setActiveTab(value)} variant="scrollable" scrollButtons="auto">
+          <Tab label="Личные данные" />
+          <Tab label="Подписка" />
+          <Tab label="Безопасность" />
+        </Tabs>
+      </Paper>
 
-        <Divider sx={{ my: 3 }} />
-        <Typography variant="h6" sx={{ mb: 1 }}>Сменить пароль</Typography>
-        <Button variant="outlined" size="small" sx={{ mb: 2 }} onClick={() => setPwdOpen(v => !v)}>
-          {pwdOpen ? 'Скрыть' : 'Открыть'} форму
-        </Button>
-        <Collapse in={pwdOpen}>
-          {pwdMsg && <Alert severity="success" sx={{ mb: 2 }}>{pwdMsg}</Alert>}
-          {pwdErr && <Alert severity="error" sx={{ mb: 2 }}>{pwdErr}</Alert>}
-          <form onSubmit={onChangePassword}>
+      {activeTab === 0 && (
+        <Paper sx={{ p: 3, maxWidth: 720 }}>
+          {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          <form onSubmit={onSave}>
             <Stack spacing={2}>
+              <TextField label="Email" value={email} InputProps={{ readOnly: true }} />
               <TextField
-                label="Текущий пароль"
-                type="password"
-                value={currentPassword}
-                onChange={e => setCurrentPassword(e.target.value)}
+                label="Имя"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                inputProps={{ minLength: 2, maxLength: 50 }}
+                helperText="От 2 до 50 символов"
                 required
               />
               <TextField
-                label="Новый пароль"
-                type="password"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
-                required
-                inputProps={{ minLength: 6 }}
-                helperText="Минимум 6 символов"
+                label="Телефон"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                placeholder="+7 999 123-45-67"
+                helperText="Формат: +7 999 123-45-67"
               />
-              <Button type="submit" variant="outlined">Обновить пароль</Button>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                <Button type="submit" variant="contained" disabled={saving}>
+                  Сохранить изменения
+                </Button>
+                <Button variant="outlined" onClick={() => navigate('/dashboard')}>
+                  В личный кабинет
+                </Button>
+              </Stack>
             </Stack>
           </form>
-        </Collapse>
-      </Paper>
+        </Paper>
+      )}
+
+      {activeTab === 1 && (
+        <Paper sx={{ p: 3, maxWidth: 720 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>Подписка и доступ</Typography>
+          <Alert severity={subscriptionInfo.severity} sx={{ mb: 2 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{subscriptionInfo.title}</Typography>
+            <Typography variant="body2">{subscriptionInfo.text}</Typography>
+          </Alert>
+          {subscription?.paidUntil && (
+            <Typography color="text.secondary" sx={{ mb: 1 }}>
+              Оплачено до: {new Date(subscription.paidUntil).toLocaleDateString('ru-RU')}
+            </Typography>
+          )}
+          {subscription?.lastPaymentAt && (
+            <Typography color="text.secondary" sx={{ mb: 2 }}>
+              Последний платеж: {new Date(subscription.lastPaymentAt).toLocaleString('ru-RU')}
+            </Typography>
+          )}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <Button variant="contained" onClick={() => navigate('/pricing')}>
+              {subscription?.status === 'active' ? 'Продлить подписку' : 'Выбрать тариф'}
+            </Button>
+            <Button variant="outlined" onClick={() => navigate('/trainer')}>
+              Перейти к тренировкам
+            </Button>
+          </Stack>
+        </Paper>
+      )}
+
+      {activeTab === 2 && (
+        <Paper sx={{ p: 3, maxWidth: 720 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>Безопасность</Typography>
+          <Typography color="text.secondary" sx={{ mb: 2 }}>
+            Регулярно обновляйте пароль для защиты аккаунта.
+          </Typography>
+          <Button variant="outlined" size="small" sx={{ mb: 2 }} onClick={() => setPwdOpen(v => !v)}>
+            {pwdOpen ? 'Скрыть форму' : 'Изменить пароль'}
+          </Button>
+          <Collapse in={pwdOpen}>
+            {pwdMsg && <Alert severity="success" sx={{ mb: 2 }}>{pwdMsg}</Alert>}
+            {pwdErr && <Alert severity="error" sx={{ mb: 2 }}>{pwdErr}</Alert>}
+            <form onSubmit={onChangePassword}>
+              <Stack spacing={2}>
+                <TextField
+                  label="Текущий пароль"
+                  type="password"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  required
+                />
+                <TextField
+                  label="Новый пароль"
+                  type="password"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  required
+                  inputProps={{ minLength: 6 }}
+                  helperText="Минимум 6 символов"
+                />
+                <Button type="submit" variant="contained">Обновить пароль</Button>
+              </Stack>
+            </form>
+          </Collapse>
+        </Paper>
+      )}
     </Box>
   );
 };

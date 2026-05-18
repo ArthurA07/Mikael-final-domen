@@ -132,6 +132,55 @@ SERVER_IP=81.31.247.70 ./scripts/sync_to_server.sh "/Users/arturartinov/Desktop/
 - После деплоя на сервере есть "лишние" файлы:
   - повторить `rsync` с `--delete` через `scripts/sync_to_server.sh`.
 
+## 7) Fast Recovery: если локальный запуск завис (macOS)
+
+Симптомы:
+- `react-scripts start` висит на `Starting the development server...`;
+- `react-scripts build` висит на `Creating an optimized production build...`;
+- backend-процесс запущен, но порт не открывается.
+
+Проверенный сценарий восстановления:
+
+```bash
+cd "/Users/arturartinov/Desktop/Mikael-final 777"
+
+# 1) Всегда запускаем под Node 20
+export PATH="/opt/homebrew/opt/node@20/bin:$PATH"
+node -v
+npm -v
+
+# 2) Чистим зависшие процессы/порты
+lsof -tiTCP:3000 | xargs kill -9 2>/dev/null || true
+lsof -tiTCP:3001 | xargs kill -9 2>/dev/null || true
+ps -ax -o pid=,command= | awk '/react-scripts|server\\/index\\.js|webpack-dev-server/{print $1}' | xargs -I{} kill -9 {} 2>/dev/null || true
+
+# 3) Переустанавливаем зависимости ПОД ТЕКУЩУЮ версию Node
+cd client && rm -rf node_modules && npm ci
+cd ../server && rm -rf node_modules && npm ci
+cd ..
+
+# 4) Собираем фронтенд
+cd client
+CI=true GENERATE_SOURCEMAP=false DISABLE_TS_CHECKER=true DISABLE_ESLINT_PLUGIN=true npm run build
+cd ..
+
+# 5) Единый запуск (frontend + api) на 3000
+NODE_ENV=production USE_IN_MEMORY_DB=true PORT=3000 node server/index.js
+```
+
+Проверка в отдельном терминале:
+
+```bash
+curl -s -o /dev/null -w "site:%{http_code}\n" http://127.0.0.1:3000/
+curl -s -o /dev/null -w "api:%{http_code}\n" http://127.0.0.1:3000/api/health
+```
+
+Ожидается: `site:200` и `api:200`.
+
+Примечания:
+- На macOS порт `5000` часто занят `ControlCenter`; это нормально, используем порт `3000` для единого запуска.
+- Если нужен hot reload, сначала восстановите рабочее состояние по шагам выше, затем переходите к разделу 2.
+
 ---
 
 Если нужно быстро проверить «всё ли ок», используйте порядок:

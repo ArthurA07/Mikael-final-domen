@@ -5,8 +5,36 @@ const User = require('../models/User');
 
 const router = express.Router();
 
+async function getSubscriptionAccess(user) {
+  if (!user) return { allowed: false, reason: 'no_user' };
+  const now = new Date();
+  const paidUntil = user.subscription?.paidUntil ? new Date(user.subscription.paidUntil) : null;
+  const isActive = user.subscription?.status === 'active' && !!paidUntil && paidUntil.getTime() > now.getTime();
+
+  if (isActive) {
+    return {
+      allowed: true,
+      reason: 'paid_active',
+      paidUntil,
+    };
+  }
+
+  // Автосинхронизация просроченной подписки
+  if (user.subscription?.status === 'active' && paidUntil && paidUntil.getTime() <= now.getTime()) {
+    user.subscription.status = 'expired';
+    await user.save();
+    return { allowed: false, reason: 'expired', paidUntil };
+  }
+
+  return {
+    allowed: false,
+    reason: user.subscription?.status === 'expired' ? 'expired' : 'subscription_required',
+    paidUntil,
+  };
+}
+
 // Публичная проверка бесплатного доступа по IP (20 минут с момента первого визита)
-// Если передан валидный токен авторизованного пользователя — доступ всегда разрешён
+// Для авторизованных пользователей доступ есть только при активной оплаченной подписке.
 router.post('/free-access', async (req, res) => {
   try {
     // Пытаемся распознать пользователя по токену, если он есть
@@ -17,7 +45,16 @@ router.post('/free-access', async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await User.findById(decoded.id);
         if (user) {
-          return res.json({ success: true, data: { allowed: true, reason: 'authenticated' } });
+          const subAccess = await getSubscriptionAccess(user);
+          return res.json({
+            success: true,
+            data: {
+              allowed: subAccess.allowed,
+              reason: subAccess.reason,
+              paidUntil: subAccess.paidUntil || null,
+              authenticated: true,
+            }
+          });
         }
       } catch (e) {
         // игнорируем — просто считаем гостем
@@ -79,7 +116,7 @@ router.post('/free-access', async (req, res) => {
 // Трекинг использования одного примера гостем — инкремент счётчика с лимитом
 router.post('/track-exercise', async (req, res) => {
   try {
-    // Авторизованный пользователь не ограничен
+    // Для авторизованных пользователей доступ зависит от оплаченной подписки.
     const authHeader = (req.headers.authorization || '').toString();
     if (authHeader.startsWith('Bearer ')) {
       try {
@@ -87,7 +124,17 @@ router.post('/track-exercise', async (req, res) => {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await User.findById(decoded.id);
         if (user) {
-          return res.json({ success: true, data: { tracked: false, reason: 'authenticated' } });
+          const subAccess = await getSubscriptionAccess(user);
+          return res.json({
+            success: true,
+            data: {
+              tracked: false,
+              allowed: subAccess.allowed,
+              reason: subAccess.reason,
+              paidUntil: subAccess.paidUntil || null,
+              authenticated: true,
+            }
+          });
         }
       } catch (e) {
         // игнорируем — продолжаем как гость
