@@ -12,6 +12,17 @@ import {
 } from '../../../utils/problemGenerator';
 
 describe('problem generator', () => {
+  const expressionOf = (problem: Problem): string => {
+    const ops = problem.ops && problem.ops.length === problem.numbers.length - 1
+      ? problem.ops
+      : Array.from({ length: Math.max(0, problem.numbers.length - 1) }, () => problem.operation);
+    let expr = `${problem.numbers[0]}`;
+    for (let i = 1; i < problem.numbers.length; i++) {
+      expr += ` ${ops[i - 1]} ${problem.numbers[i]}`;
+    }
+    return expr;
+  };
+
   test('sum within range', () => {
     const gen = generateProblemFactory({ numbersCount: 3, numberRange: 10, operations: ['+'] });
     for (let i = 0; i < 50; i++) {
@@ -604,6 +615,67 @@ describe('problem generator', () => {
         });
       });
     });
+  });
+
+  test('standard division fallback is not fixed to classic x/2 template', () => {
+    const classicFallbacks = new Set(['8 / 2', '98 / 2', '998 / 2', '19998 / 2']);
+
+    [9, 99, 999, 999999].forEach((numberRange) => {
+      const gen = generateProblemFactory({ numbersCount: 3, numberRange, operations: ['/'], lawsMode: 'none' });
+      const unique = new Set<string>();
+      let classicCount = 0;
+      for (let i = 0; i < 400; i++) {
+        const p = gen();
+        // Деление всегда целочисленное
+        let acc = p.numbers[0];
+        for (let j = 1; j < p.numbers.length; j++) acc = acc / p.numbers[j];
+        expect(Number.isInteger(acc)).toBe(true);
+        expect(acc).toBe(p.correctAnswer);
+
+        const expr = expressionOf(p);
+        unique.add(expr);
+        if (classicFallbacks.has(expr)) classicCount += 1;
+      }
+
+      // Для малых диапазонов вариантов меньше, но всё равно должна быть вариативность.
+      const minUnique = numberRange === 9 ? 4 : 40;
+      expect(unique.size).toBeGreaterThanOrEqual(minUnique);
+      expect(classicCount).toBeLessThan(40);
+    });
+  });
+
+  test('standard division in 1-9 softly limits x/x and answer=1 frequency', () => {
+    const gen = generateProblemFactory({ numbersCount: 3, numberRange: 9, operations: ['/'], lawsMode: 'none' });
+    let answerOne = 0;
+    let exactSelfDivision = 0;
+    const total = 500;
+
+    for (let i = 0; i < total; i++) {
+      const p = gen();
+      if (p.correctAnswer === 1) answerOne += 1;
+      if (p.numbers.length === 2 && p.numbers[0] === p.numbers[1]) exactSelfDivision += 1;
+    }
+
+    expect(answerOne / total).toBeLessThan(0.5);
+    expect(exactSelfDivision / total).toBeLessThan(0.3);
+  });
+
+  test('standard minus in range 1-9 avoids excessive repeated easy chains', () => {
+    const gen = generateProblemFactory({ numbersCount: 3, numberRange: 9, operations: ['-'], lawsMode: 'none' });
+    const freq = new Map<string, number>();
+    let repeatedOnes = 0;
+
+    for (let i = 0; i < 400; i++) {
+      const p = gen();
+      const expr = expressionOf(p);
+      freq.set(expr, (freq.get(expr) || 0) + 1);
+      if (p.numbers[1] === 1 && p.numbers[2] === 1) repeatedOnes += 1;
+    }
+
+    const maxRepeat = Math.max(...freq.values());
+    expect(freq.size).toBeGreaterThanOrEqual(70);
+    expect(maxRepeat).toBeLessThan(40);
+    expect(repeatedOnes).toBeLessThan(140);
   });
 });
 

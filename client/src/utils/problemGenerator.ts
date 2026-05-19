@@ -268,6 +268,11 @@ export function generateProblemFactory(settings: GeneratorSettings) {
   const MAX_MUL_VALUE = Math.pow(10, MAX_MUL_DIGITS) - 1; // 999
   const MAX_DIVIDEND_VALUE = Math.pow(10, MAX_DIVIDEND_DIGITS) - 1; // 999999
   const MAX_DIVISOR_VALUE = Math.pow(10, MAX_DIVISOR_DIGITS) - 1; // 9999
+  const STANDARD_RECENT_CACHE_LIMIT = 80;
+  const STANDARD_ANTI_REPEAT_MAX_RETRIES = 30;
+  const recentStandardExpressions: string[] = [];
+  let antiRepeatDepth = 0;
+  let generateImpl: null | (() => Problem) = null;
 
   function makeWithUnits(max: number, units: number, min = 1): number {
     // Подбираем число с заданной единичной цифрой, не превышая max
@@ -895,7 +900,40 @@ export function generateProblemFactory(settings: GeneratorSettings) {
     }
   }
 
+  function toExpression(numbers: number[], operation: Operation, ops?: Operation[]): string {
+    const seq = ops && ops.length === numbers.length - 1
+      ? ops
+      : Array.from({ length: Math.max(0, numbers.length - 1) }, () => operation);
+    let expr = String(numbers[0] ?? 0);
+    for (let i = 1; i < numbers.length; i++) {
+      expr += ` ${seq[i - 1]} ${numbers[i]}`;
+    }
+    return expr;
+  }
+
+  function rememberStandardExpression(expr: string) {
+    recentStandardExpressions.push(expr);
+    if (recentStandardExpressions.length > STANDARD_RECENT_CACHE_LIMIT) {
+      recentStandardExpressions.splice(0, recentStandardExpressions.length - STANDARD_RECENT_CACHE_LIMIT);
+    }
+  }
+
+  function finalizeProblem(problem: Problem): Problem {
+    if (cfg.lawsMode !== 'none') return problem;
+    const expr = toExpression(problem.numbers, problem.operation, problem.ops);
+    const isRecentRepeat = recentStandardExpressions.includes(expr);
+    if (isRecentRepeat && antiRepeatDepth < STANDARD_ANTI_REPEAT_MAX_RETRIES && generateImpl) {
+      antiRepeatDepth += 1;
+      const regenerated = generateImpl();
+      antiRepeatDepth -= 1;
+      return regenerated;
+    }
+    rememberStandardExpression(expr);
+    return problem;
+  }
+
   return function generate(): Problem {
+    generateImpl = generate;
     const minValue = cfg.numberRangeMin ?? 1;
     const maxValue = cfg.numberRange;
 
@@ -914,21 +952,21 @@ export function generateProblemFactory(settings: GeneratorSettings) {
     if (cfg.lawsMode === 'five' && !isMulOrDiv && effectiveNumbersCount >= 2 && maxValue >= 1) {
       const law5Problem = tryGenerateLaw5Problem(maxValue, minValue, effectiveNumbersCount);
       if (law5Problem) {
-        return law5Problem;
+        return finalizeProblem(law5Problem);
       }
     }
 
     if (cfg.lawsMode === 'ten' && !isMulOrDiv && effectiveNumbersCount >= 2 && maxValue >= 1) {
       const law10Problem = tryGenerateLaw10Problem(maxValue, minValue, effectiveNumbersCount);
       if (law10Problem) {
-        return law10Problem;
+        return finalizeProblem(law10Problem);
       }
     }
 
     if (cfg.lawsMode === 'both' && !isMulOrDiv && effectiveNumbersCount >= 2 && maxValue >= 1) {
       const combinedProblem = tryGenerateBothLawsProblem(maxValue, minValue, effectiveNumbersCount);
       if (combinedProblem) {
-        return combinedProblem;
+        return finalizeProblem(combinedProblem);
       }
     }
 
@@ -937,7 +975,7 @@ export function generateProblemFactory(settings: GeneratorSettings) {
       const wantsMixedPlusMinus = effectiveNumbersCount >= 3 && cfg.operations.includes('+') && cfg.operations.includes('-') && !isMulOrDiv;
       if (wantsMixedPlusMinus) {
         // Генерируем как минимум один '+' и один '-'
-        const maxAttempts = 25;
+        const maxAttempts = 60;
         let builtMixed = false;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           opsSequence = Array.from({ length: effectiveNumbersCount - 1 }, () => (Math.random() < 0.5 ? '+' : '-')) as Operation[];
@@ -972,24 +1010,39 @@ export function generateProblemFactory(settings: GeneratorSettings) {
         // Защитный фолбэк: даже если случайная генерация не нашла корректную цепочку,
         // возвращаем валидный пример с обеими операциями и неотрицательными промежуточными значениями.
         if (!builtMixed) {
-          opsSequence = Array.from(
-            { length: effectiveNumbersCount - 1 },
-            (_, idx) => (idx % 2 === 0 ? '+' : '-')
-          ) as Operation[];
+          opsSequence = Array.from({ length: effectiveNumbersCount - 1 }, () => (Math.random() < 0.5 ? '+' : '-')) as Operation[];
+          if (!opsSequence.includes('+')) opsSequence[0] = '+';
+          if (!opsSequence.includes('-')) opsSequence[opsSequence.length - 1] = '-';
           numbers.length = 0;
-          let acc = Math.max(minValue, Math.min(maxValue, Math.max(minValue * 2, Math.floor(maxValue * 0.7))));
+          let acc = randomIntInclusive(maxValue, minValue);
           numbers.push(acc);
+          let prevPick: number | null = null;
           for (let i = 0; i < opsSequence.length; i++) {
             const op = opsSequence[i];
             if (op === '+') {
-              const n = Math.max(minValue, Math.min(maxValue, Math.max(minValue, Math.floor(maxValue / 2))));
+              const lower = Math.max(minValue, Math.floor(maxValue * 0.25));
+              const n = randomIntInclusive(maxValue, lower);
               numbers.push(n);
               acc += n;
+              prevPick = n;
             } else {
               const hi = Math.max(minValue, Math.min(maxValue, acc));
-              const n = Math.max(minValue, Math.min(hi, Math.max(minValue, Math.floor(acc / 2))));
+              if (hi <= minValue) {
+                numbers.push(minValue);
+                acc -= minValue;
+                prevPick = minValue;
+                continue;
+              }
+              const low = Math.max(minValue, Math.floor(hi * 0.2));
+              const candidates: number[] = [];
+              for (let v = low; v <= hi; v++) candidates.push(v);
+              const filtered = prevPick !== null && candidates.length > 1
+                ? candidates.filter(v => v !== prevPick)
+                : candidates;
+              const n = pickRandom(filtered.length ? filtered : candidates);
               numbers.push(n);
               acc -= n;
+              prevPick = n;
             }
           }
         }
@@ -1021,14 +1074,32 @@ export function generateProblemFactory(settings: GeneratorSettings) {
           //  - промежуточный результат никогда не уходит в минус
           let remainingToSubtract = a0 - r;
           const canKeepMinRest = maxValue >= (effectiveNumbersCount - 1) * minValue;
+          let prevPick: number | null = null;
           for (let i = 1; i < effectiveNumbersCount; i++) {
             const remainingSteps = effectiveNumbersCount - i;
             const minThis = canKeepMinRest ? minValue : 0;
             const minNeededForRest = (remainingSteps - 1) * minThis;
             const maxForThis = Math.min(maxValue, remainingToSubtract - minNeededForRest);
-            const pick = maxForThis <= minThis ? minThis : randomIntInclusive(maxForThis, minThis);
+            const candidateMin = Math.min(minThis, maxForThis);
+            const candidateMax = Math.max(minThis, maxForThis);
+            let pick = candidateMax <= candidateMin ? candidateMin : randomIntInclusive(candidateMax, candidateMin);
+            if (candidateMax > candidateMin) {
+              // Снижаем шаблонность для маленьких диапазонов: реже повторяем одно и то же и реже берём 1.
+              if (prevPick !== null && pick === prevPick && Math.random() < 0.65) {
+                const altCandidates: number[] = [];
+                for (let v = candidateMin; v <= candidateMax; v++) {
+                  if (v !== prevPick) altCandidates.push(v);
+                }
+                if (altCandidates.length) pick = pickRandom(altCandidates);
+              }
+              if (pick <= 1 && candidateMax >= 2 && Math.random() < 0.7) {
+                const altMin = Math.max(2, candidateMin);
+                if (candidateMax >= altMin) pick = randomIntInclusive(candidateMax, altMin);
+              }
+            }
             numbers.push(pick);
             remainingToSubtract -= pick;
+            prevPick = pick;
           }
         } else {
           for (let i = 0; i < effectiveNumbersCount; i++) {
@@ -1098,7 +1169,7 @@ export function generateProblemFactory(settings: GeneratorSettings) {
         // Деление генерируем КОНСТРУКТИВНО: сначала выбираем делители (>=2, <=4 разряда),
         // затем подбираем частное и вычисляем делимое (<=6 разрядов). Так исключаем /1 и /1/1.
         {
-          const countDivs = Math.min(effectiveNumbersCount, 3) - 1; // 1 или 2 делителя
+          const configuredCountDivs = Math.min(effectiveNumbersCount, 3) - 1; // 1 или 2 делителя
 
           // Диапазон делимого: если указана разрядность — игнорируем numberRange, иначе ограничиваемся numberRange, но не больше 6 разрядов.
           const maxDividendByRange = cfg.divisionDividendDigits ? MAX_DIVIDEND_VALUE : Math.min(MAX_DIVIDEND_VALUE, maxValue);
@@ -1117,34 +1188,114 @@ export function generateProblemFactory(settings: GeneratorSettings) {
               const hi = Math.min(MAX_DIVISOR_VALUE, Math.pow(10, digits) - 1);
               return randomIntInclusive(hi, lo);
             }
-            return randomIntInclusive(MAX_DIVISOR_VALUE, 2);
+            const hi = Math.min(MAX_DIVISOR_VALUE, Math.max(2, maxValue));
+            const preferHi = Math.max(2, Math.floor(maxDividend / 2));
+            const weightedHi = Math.min(hi, preferHi);
+            // Мягко смещаем выбор в сторону делителей, где чаще возможно частное > 1.
+            if (weightedHi >= 2 && Math.random() < 0.8) {
+              return randomIntInclusive(weightedHi, 2);
+            }
+            return randomIntInclusive(hi, 2);
           };
 
-          const attempts = 60;
-          for (let a = 0; a < attempts; a++) {
+          const tryBuildDivision = (countDivs: number): { numbers: number[]; correctAnswer: number } | null => {
             const d1 = pickDivisor(d1Digits);
             const d2 = countDivs >= 2 ? pickDivisor(d2Digits) : 1;
             const base = d1 * d2;
-            if (base <= 0) continue;
-
+            if (base <= 0) return null;
             const qMax = Math.floor(maxDividend / base);
-            const qMin = Math.max(2, Math.ceil(minDividend / base));
-            if (qMax < qMin) continue;
-
+            const qMinBase = Math.ceil(minDividend / base);
+            const qMin = qMax >= 2 ? Math.max(2, qMinBase) : Math.max(1, qMinBase);
+            if (qMax < qMin) return null;
             const q = randomIntInclusive(qMax, qMin);
             const dividend = base * q;
-            if (dividend < minDividend || dividend > maxDividend) continue;
+            if (dividend < minDividend || dividend > maxDividend) return null;
+            const isTrivialOne = q === 1;
+            const isExactSelfDivision = countDivs === 1 && dividend === d1;
+            // Не запрещаем q=1 и x/x, но заметно снижаем частоту при наличии альтернатив.
+            if (isTrivialOne && qMax < 2 && Math.random() < 0.75) return null;
+            if (isExactSelfDivision && Math.random() < 0.75) return null;
+            return {
+              numbers: countDivs >= 2 ? [dividend, d1, d2] : [dividend, d1],
+              correctAnswer: q,
+            };
+          };
 
-            if (countDivs >= 2) {
-              return { numbers: [dividend, d1, d2], operation: '/', correctAnswer: q };
+          const attempts = 120;
+          let divisionBuilt = false;
+          for (let a = 0; a < attempts; a++) {
+            const primary = tryBuildDivision(configuredCountDivs);
+            if (primary) {
+              numbers.splice(0, numbers.length, ...primary.numbers);
+              correctAnswer = primary.correctAnswer;
+              divisionBuilt = true;
+              break;
             }
-            return { numbers: [dividend, d1], operation: '/', correctAnswer: q };
+            if (configuredCountDivs >= 2) {
+              const reduced = tryBuildDivision(1);
+              if (reduced) {
+                numbers.splice(0, numbers.length, ...reduced.numbers);
+                correctAnswer = reduced.correctAnswer;
+                divisionBuilt = true;
+                break;
+              }
+            }
           }
 
-          // Если совсем не получилось (крайние настройки) — безопасный фолбэк
-          const d1 = 2;
-          const q = Math.max(2, Math.min(9999, Math.floor(maxDividend / d1) || 2));
-          return { numbers: [d1 * q, d1], operation: '/', correctAnswer: q };
+          if (divisionBuilt) break;
+
+          // Разнообразный fallback: строим набор валидных кандидатов вместо фиксированного divisor=2.
+          const candidates: Array<{ numbers: number[]; correctAnswer: number; weight: number }> = [];
+          for (const countDivs of configuredCountDivs >= 2 ? [2, 1] : [1]) {
+            const maxSmallDivisor = Math.min(12, Math.max(2, maxValue));
+            for (let d1 = 2; d1 <= maxSmallDivisor; d1++) {
+              const d2Values = countDivs >= 2 ? Array.from({ length: maxSmallDivisor - 1 }, (_, idx) => idx + 2) : [1];
+              for (const d2 of d2Values) {
+                const base = d1 * d2;
+                if (base <= 0) continue;
+                const qMax = Math.floor(maxDividend / base);
+                const qMinBase = Math.ceil(minDividend / base);
+                const qMin = qMax >= 2 ? Math.max(2, qMinBase) : Math.max(1, qMinBase);
+                if (qMax < qMin) continue;
+                const q = randomIntInclusive(qMax, qMin);
+                const dividend = base * q;
+                if (dividend < minDividend || dividend > maxDividend) continue;
+                const isExactSelfDivision = countDivs === 1 && dividend === d1;
+                let weight = 1;
+                if (q === 1) weight *= 0.25;
+                if (isExactSelfDivision) weight *= 0.2;
+                candidates.push({
+                  numbers: countDivs >= 2 ? [dividend, d1, d2] : [dividend, d1],
+                  correctAnswer: q,
+                  weight,
+                });
+              }
+            }
+          }
+
+          if (candidates.length) {
+            const totalWeight = candidates.reduce((sum, c) => sum + c.weight, 0);
+            let r = Math.random() * (totalWeight > 0 ? totalWeight : candidates.length);
+            let picked = candidates[candidates.length - 1];
+            for (const candidate of candidates) {
+              const w = totalWeight > 0 ? candidate.weight : 1;
+              r -= w;
+              if (r <= 0) {
+                picked = candidate;
+                break;
+              }
+            }
+            numbers.splice(0, numbers.length, ...picked.numbers);
+            correctAnswer = picked.correctAnswer;
+            break;
+          }
+
+          // Последний защитный fallback на случай экстремальных ограничений.
+          const d1 = Math.min(9, Math.max(2, maxDividend));
+          const q = Math.max(1, Math.floor(maxDividend / Math.max(2, d1)));
+          numbers.splice(0, numbers.length, Math.max(1, d1 * q), Math.max(2, d1));
+          correctAnswer = q;
+          break;
         }
       default:
         correctAnswer = numbers.reduce((s, n) => s + n, 0);
@@ -1152,10 +1303,10 @@ export function generateProblemFactory(settings: GeneratorSettings) {
 
     // Если создали смешанную последовательность, всегда проставляем operation как '+' (UI/сервер совместим)
     if (opsSequence && opsSequence.length === numbers.length - 1) {
-      return { numbers, operation: '+', correctAnswer, ops: opsSequence.map(op => (op === '+' || op === '-' ? op : '+')) };
+      return finalizeProblem({ numbers, operation: '+', correctAnswer, ops: opsSequence.map(op => (op === '+' || op === '-' ? op : '+')) });
     }
 
-    return { numbers, operation, correctAnswer };
+    return finalizeProblem({ numbers, operation, correctAnswer });
   };
 }
 
