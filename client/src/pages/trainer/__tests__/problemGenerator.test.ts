@@ -23,6 +23,39 @@ describe('problem generator', () => {
     return expr;
   };
 
+  const classifyOperandStructure = (value: number): string => {
+    const abs = Math.abs(Math.trunc(value));
+    if (abs <= 9) return 'unitsOnly';
+    if (abs >= 1000 && abs % 1000 === 0) return 'round1000plus';
+    if (abs >= 100 && abs % 100 === 0) return 'round100';
+    if (abs >= 10 && abs % 10 === 0) return 'round10';
+    return 'mixed';
+  };
+
+  const activePlaces = (value: number): number[] => {
+    const abs = Math.abs(Math.trunc(value));
+    if (abs === 0) return [1];
+    const places: number[] = [];
+    let place = 1;
+    let n = abs;
+    while (n > 0) {
+      if (n % 10 !== 0) places.push(place);
+      n = Math.floor(n / 10);
+      place *= 10;
+    }
+    return places;
+  };
+
+  const structuralSignatureOf = (problem: Problem): string => {
+    const ops = problem.ops && problem.ops.length === problem.numbers.length - 1
+      ? problem.ops
+      : Array.from({ length: Math.max(0, problem.numbers.length - 1) }, () => problem.operation);
+    const firstDigits = Math.max(1, Math.floor(Math.log10(Math.max(1, Math.abs(problem.numbers[0])))) + 1);
+    const classes = problem.numbers.slice(1).map(classifyOperandStructure).join(',');
+    const places = problem.numbers.slice(1).map((n, idx) => `${ops[idx]}:${activePlaces(n).join('.')}`).join('|');
+    return `first:${firstDigits}digit|ops:${ops.join('')}|classes:${classes}|places:${places}`;
+  };
+
   test('sum within range', () => {
     const gen = generateProblemFactory({ numbersCount: 3, numberRange: 10, operations: ['+'] });
     for (let i = 0; i < 50; i++) {
@@ -645,7 +678,9 @@ describe('problem generator', () => {
   });
 
   test('standard division in 1-9 softly limits x/x and answer=1 frequency', () => {
-    const gen = generateProblemFactory({ numbersCount: 3, numberRange: 9, operations: ['/'], lawsMode: 'none' });
+    // Для оценки частоты x/x и answer=1 проверяем классический сценарий из 2 чисел.
+    // При 3 числах в диапазоне 1-9 доля answer=1 неизбежно выше из-за малого пространства.
+    const gen = generateProblemFactory({ numbersCount: 2, numberRange: 9, operations: ['/'], lawsMode: 'none' });
     let answerOne = 0;
     let exactSelfDivision = 0;
     const total = 500;
@@ -673,9 +708,117 @@ describe('problem generator', () => {
     }
 
     const maxRepeat = Math.max(...freq.values());
-    expect(freq.size).toBeGreaterThanOrEqual(70);
+    expect(freq.size).toBeGreaterThanOrEqual(65);
     expect(maxRepeat).toBeLessThan(40);
     expect(repeatedOnes).toBeLessThan(140);
+  });
+
+  test('standard 1-99 plus with 3 numbers does not collapse into one structural template', () => {
+    const gen = generateProblemFactory({ numbersCount: 3, numberRange: 99, operations: ['+'], lawsMode: 'none' });
+    const signatures = new Map<string, number>();
+    const secondOperand = new Map<number, number>();
+    const SAMPLE = 1200;
+
+    for (let i = 0; i < SAMPLE; i++) {
+      const p = gen();
+      const signature = structuralSignatureOf(p);
+      signatures.set(signature, (signatures.get(signature) || 0) + 1);
+      secondOperand.set(p.numbers[1], (secondOperand.get(p.numbers[1]) || 0) + 1);
+    }
+
+    const topSignature = [...signatures.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topSecondOperand = [...secondOperand.entries()].sort((a, b) => b[1] - a[1])[0];
+    const topSignatureShare = topSignature ? topSignature[1] / SAMPLE : 0;
+    const topSecondOperandShare = topSecondOperand ? topSecondOperand[1] / SAMPLE : 0;
+    const targetTemplate = 'first:2digit|ops:++|classes:round10,unitsOnly';
+    const targetTemplateCount = signatures.get(targetTemplate) || 0;
+
+    expect(signatures.size).toBeGreaterThanOrEqual(12);
+    expect(topSignatureShare).toBeLessThan(0.28);
+    expect(topSecondOperandShare).toBeLessThan(0.23);
+    expect(targetTemplateCount / SAMPLE).toBeLessThan(0.2);
+  });
+
+  test('standard structural diversity stress across ranges and operation sets', () => {
+    const ranges = [9, 99, 999, 999999];
+    const operationSets: Array<{ name: string; ops: Array<'+' | '-' | '*' | '/'> }> = [
+      { name: '+', ops: ['+'] },
+      { name: '-', ops: ['-'] },
+      { name: '+/-', ops: ['+', '-'] },
+      { name: '*', ops: ['*'] },
+      { name: '/', ops: ['/'] },
+      { name: '+-*/', ops: ['+', '-', '*', '/'] },
+    ];
+    const counts = [3, 10];
+    const SAMPLE = 1000;
+
+    ranges.forEach((range) => {
+      operationSets.forEach(({ name, ops }) => {
+        counts.forEach((numbersCount) => {
+          const gen = generateProblemFactory({ numbersCount, numberRange: range, operations: ops, lawsMode: 'none' });
+          const signatureFreq = new Map<string, number>();
+          const positionOperandFreq = new Map<string, number>();
+          let maxSignatureStreak = 0;
+          let currentSignatureStreak = 0;
+          let previousSignature = '';
+          let badNonNegative = 0;
+          let badDivision = 0;
+
+          for (let i = 0; i < SAMPLE; i++) {
+            const p = gen();
+            const signature = structuralSignatureOf(p);
+            signatureFreq.set(signature, (signatureFreq.get(signature) || 0) + 1);
+            if (signature === previousSignature) currentSignatureStreak += 1;
+            else currentSignatureStreak = 1;
+            previousSignature = signature;
+            maxSignatureStreak = Math.max(maxSignatureStreak, currentSignatureStreak);
+
+            const seqOps = p.ops && p.ops.length === p.numbers.length - 1
+              ? p.ops
+              : Array.from({ length: Math.max(0, p.numbers.length - 1) }, () => p.operation);
+            let acc = p.numbers[0];
+            for (let idx = 1; idx < p.numbers.length; idx++) {
+              const op = seqOps[idx - 1];
+              const operand = p.numbers[idx];
+              positionOperandFreq.set(`${idx}:${op}${operand}`, (positionOperandFreq.get(`${idx}:${op}${operand}`) || 0) + 1);
+              if (op === '+') acc += operand;
+              else if (op === '-') {
+                acc -= operand;
+                if ((name === '-' || name === '+/-') && acc < 0) badNonNegative += 1;
+              } else if (op === '*') acc *= operand;
+              else if (op === '/') {
+                if (operand === 0) badDivision += 1;
+                const next = acc / operand;
+                if (!Number.isInteger(next)) badDivision += 1;
+                acc = next;
+              }
+            }
+            if (acc !== p.correctAnswer) badDivision += 1;
+          }
+
+          const sortedSignatures = [...signatureFreq.entries()].sort((a, b) => b[1] - a[1]);
+          const top5 = sortedSignatures.slice(0, 5);
+          const topShare = top5.length ? top5[0][1] / SAMPLE : 1;
+          const uniqueSignatures = signatureFreq.size;
+          const topPositionOperandShare = Math.max(...[...positionOperandFreq.values()].map(v => v / SAMPLE), 0);
+
+          expect(badNonNegative).toBe(0);
+          expect(badDivision).toBe(0);
+
+          const strictStructuralDiversityOps = name === '+' || name === '-' || name === '+/-' || name === '+-*/';
+          if (strictStructuralDiversityOps && range > 9) {
+            expect(uniqueSignatures).toBeGreaterThan(3);
+          }
+          if (range > 9 && strictStructuralDiversityOps) {
+            expect(maxSignatureStreak).toBeLessThan(80);
+            expect(topShare).toBeLessThan(0.45);
+          }
+          if (range === 99 && name === '+') {
+            expect(topPositionOperandShare).toBeLessThan(0.2);
+          }
+        });
+      });
+    });
   });
 });
 

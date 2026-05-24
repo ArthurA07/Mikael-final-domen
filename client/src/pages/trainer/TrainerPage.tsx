@@ -45,6 +45,11 @@ interface Problem {
   numbers: number[];
   operation: '+' | '-' | '*' | '/';
   correctAnswer: number;
+  // Режим twoScreens: независимая задача для игрока B
+  numbersB?: number[];
+  operationB?: '+' | '-' | '*' | '/';
+  correctAnswerB?: number;
+  opsB?: ('+' | '-' | '*' | '/')[];
   userAnswer?: number;
   userAnswerB?: number;
   timeSpent?: number;
@@ -188,6 +193,10 @@ const TrainerPage: React.FC = () => {
     dx: 0,
     dy: 0,
   });
+  const [abacusFit, setAbacusFit] = useState<{ key: string; scale: number }>({
+    key: '',
+    scale: 1,
+  });
   const [problemColor, setProblemColor] = useState<{
     key: string;
     color: string;
@@ -210,6 +219,16 @@ const TrainerPage: React.FC = () => {
       : 'none';
     return `${sessionKey}:${problemIdx}:${signature}`;
   }, [state.currentSession?.startTime, state.currentSession?.currentProblemIndex, state.currentProblem]);
+
+  const getExpressionText = useCallback((problem: Pick<Problem, 'numbers' | 'operation' | 'ops'>): string => {
+    const { numbers, operation, ops } = problem;
+    if (ops && ops.length === numbers.length - 1) {
+      let s = `${numbers[0]}`;
+      for (let i = 1; i < numbers.length; i++) s += ` ${ops[i - 1]} ${numbers[i]}`;
+      return s;
+    }
+    return numbers.join(` ${operation} `);
+  }, []);
 
   const getSafeRandomPosition = useCallback((
     containerSize: { width: number; height: number },
@@ -275,6 +294,41 @@ const TrainerPage: React.FC = () => {
     setProblemPosition({ key: currentProblemKey, dx: next.dx, dy: next.dy });
   }, [currentSettings, state.showProblem, currentProblemKey, getSafeRandomPosition]);
 
+  const recalculateAbacusFit = useCallback(() => {
+    const isAbacusMode = currentSettings.displayMode === 'abacus';
+    const isSequential = !!(currentSettings as any).sequentialDisplay;
+    const isTwoScreens = !!(currentSettings as any).twoScreens;
+    if (!state.showProblem || !isAbacusMode || isSequential || isTwoScreens) {
+      setAbacusFit(prev => (prev.key === currentProblemKey && prev.scale === 1)
+        ? prev
+        : { key: currentProblemKey, scale: 1 });
+      return;
+    }
+
+    const viewportEl = displayViewportRef.current;
+    const contentEl = displayContentRef.current;
+    if (!viewportEl || !contentEl) return;
+
+    const viewportRect = viewportEl.getBoundingClientRect();
+    const rawContentWidth = contentEl.scrollWidth || contentEl.offsetWidth || contentEl.getBoundingClientRect().width;
+    const rawContentHeight = contentEl.scrollHeight || contentEl.offsetHeight || contentEl.getBoundingClientRect().height;
+    if (!rawContentWidth || !rawContentHeight) return;
+
+    const horizontalPadding = isMobile ? 12 : 20;
+    const verticalPadding = isMobile ? 12 : 16;
+    const widthLimit = Math.max(1, viewportRect.width - horizontalPadding * 2);
+    const heightLimit = Math.max(1, viewportRect.height - verticalPadding * 2);
+    const scaleByWidth = widthLimit / rawContentWidth;
+    const scaleByHeight = heightLimit / rawContentHeight;
+    const nextScale = Math.max(0.2, Math.min(1, Math.min(scaleByWidth, scaleByHeight)));
+
+    setAbacusFit(prev => (
+      prev.key === currentProblemKey && Math.abs(prev.scale - nextScale) < 0.01
+        ? prev
+        : { key: currentProblemKey, scale: nextScale }
+    ));
+  }, [currentProblemKey, currentSettings, isMobile, state.showProblem]);
+
   useEffect(() => {
     if (!(currentSettings as any).randomPosition || !state.showProblem) {
       setProblemPosition(prev => (prev.dx === 0 && prev.dy === 0 && prev.key === currentProblemKey)
@@ -291,6 +345,23 @@ const TrainerPage: React.FC = () => {
   }, [currentProblemKey, state.showProblem, currentSettings, recalculateProblemPosition]);
 
   useEffect(() => {
+    if (!state.showProblem) {
+      setAbacusFit(prev => (prev.scale === 1 ? prev : { key: currentProblemKey, scale: 1 }));
+      return;
+    }
+    const rafId = requestAnimationFrame(() => {
+      recalculateAbacusFit();
+    });
+    const lateMeasureId = window.setTimeout(() => {
+      recalculateAbacusFit();
+    }, 140);
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.clearTimeout(lateMeasureId);
+    };
+  }, [currentProblemKey, state.showProblem, currentSettings, recalculateAbacusFit]);
+
+  useEffect(() => {
     if (!(currentSettings as any).randomPosition || !state.showProblem) return;
     let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
     const onResize = () => {
@@ -303,6 +374,20 @@ const TrainerPage: React.FC = () => {
       window.removeEventListener('resize', onResize);
     };
   }, [currentSettings, state.showProblem, recalculateProblemPosition]);
+
+  useEffect(() => {
+    if (!state.showProblem) return;
+    let resizeTimeout: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => recalculateAbacusFit(), 120);
+    };
+    window.addEventListener('resize', onResize);
+    return () => {
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [state.showProblem, recalculateAbacusFit]);
 
   const toRgb = useCallback((input: string): { r: number; g: number; b: number } | null => {
     const value = (input || '').trim().toLowerCase();
@@ -557,10 +642,31 @@ const TrainerPage: React.FC = () => {
       }
     }
 
+    const isTwoScreensMode = !!(currentSettings as any).twoScreens;
     for (let i = 0; i < total; i++) {
       const g = plan[i];
       const factory = factories.get(keyOf(g))!;
-      problems.push(factory() as Problem);
+      const a = factory() as Problem;
+      if (!isTwoScreensMode) {
+        problems.push(a);
+        continue;
+      }
+
+      let b = factory() as Problem;
+      const aExpr = getExpressionText(a);
+      let retries = 0;
+      while (retries < 12 && getExpressionText(b) === aExpr) {
+        b = factory() as Problem;
+        retries += 1;
+      }
+
+      problems.push({
+        ...a,
+        numbersB: b.numbers,
+        operationB: b.operation,
+        correctAnswerB: b.correctAnswer,
+        opsB: b.ops,
+      });
     }
     
     const session: TrainingSession = {
@@ -584,6 +690,8 @@ const TrainerPage: React.FC = () => {
       timeLeft: currentSettings.displaySpeed,
       sequentialIndex: 0,
       userAnswer: '',
+      // @ts-ignore
+      userAnswerB: '',
     }));
     // Сбрасываем защитные флаги для новой сессии
     submittingAnswerRef.current = false;
@@ -641,7 +749,10 @@ const TrainerPage: React.FC = () => {
       const userAnswerB = parseInt(((state as any).userAnswerB || ''));
       const isTwo = !!(currentSettings as any).twoScreens;
       const isCorrect = userAnswer === state.currentProblem.correctAnswer;
-      const isCorrectB = isTwo ? (userAnswerB === state.currentProblem.correctAnswer) : undefined;
+      const correctAnswerB = isTwo
+        ? ((state.currentProblem as any).correctAnswerB ?? state.currentProblem.correctAnswer)
+        : undefined;
+      const isCorrectB = isTwo ? (userAnswerB === correctAnswerB) : undefined;
       const timeSpent = Date.now() - state.problemStartTime;
       const timeSpentB = isTwo ? timeSpent : undefined;
       
@@ -919,9 +1030,12 @@ const TrainerPage: React.FC = () => {
     if (!state.isTraining || state.currentStep !== 'showing' || !state.showProblem) return;
 
     const numbers = state.currentProblem?.numbers || [];
+    const numbersB = ((state.currentProblem as any)?.numbersB || []) as number[];
+    const isTwoScreens = !!(currentSettings as any).twoScreens;
+    const timelineLength = isTwoScreens ? Math.max(numbers.length, numbersB.length) : numbers.length;
     const sequential = !!(currentSettings as any).sequentialDisplay;
 
-    if (sequential && numbers.length > 0) {
+    if (sequential && timelineLength > 0) {
       let localIndex = state.sequentialIndex || 0;
       let stepStart = Date.now();
       const tick = setInterval(() => {
@@ -930,9 +1044,9 @@ const TrainerPage: React.FC = () => {
         setState(prev => ({ ...prev, timeLeft: remaining }));
         if (remaining === 0) {
           localIndex += 1;
-          if (localIndex >= numbers.length) {
+          if (localIndex >= timelineLength) {
             clearInterval(tick);
-            setState(prev => ({ ...prev, sequentialIndex: numbers.length - 1, showProblem: false, currentStep: 'answering', answerTimeLeft: ((currentSettings as any).answerPause || 0) * 1000 }));
+            setState(prev => ({ ...prev, sequentialIndex: Math.max(0, timelineLength - 1), showProblem: false, currentStep: 'answering', answerTimeLeft: ((currentSettings as any).answerPause || 0) * 1000 }));
           } else {
             stepStart = Date.now();
             setState(prev => ({ ...prev, sequentialIndex: localIndex, timeLeft: currentSettings.displaySpeed }));
@@ -979,8 +1093,21 @@ const TrainerPage: React.FC = () => {
     if (!state.currentProblem) return null;
 
     const { numbers, operation } = state.currentProblem;
+    const numbersB = ((state.currentProblem as any).numbersB || []) as number[];
+    const operationB = (((state.currentProblem as any).operationB || operation) as Operation);
+    const opsB = (((state.currentProblem as any).opsB || []) as Operation[]);
     const isTwoScreens = !!(currentSettings as any).twoScreens;
     const canSubmitCurrentAnswer = Boolean(state.userAnswer && (!isTwoScreens || (state as any).userAnswerB));
+    const sequential = !!(currentSettings as any).sequentialDisplay;
+
+    const expressionByStep = (vals: number[], op: Operation, opsSeq?: Operation[]) => {
+      const idx = Math.min(state.sequentialIndex || 0, Math.max(0, vals.length - 1));
+      if (!sequential) return getExpressionText({ numbers: vals, operation: op, ops: opsSeq });
+      const num = vals[idx];
+      if (idx === 0) return String(num ?? '');
+      const opFromSeq = opsSeq?.[idx - 1];
+      return `${opFromSeq || op} ${num ?? ''}`;
+    };
 
     // Визуальные "рандомизации" (позиция/цвет).
     // Позиция фиксируется на весь текущий пример и меняется только на новом примере.
@@ -989,6 +1116,9 @@ const TrainerPage: React.FC = () => {
     const activeOffset = randomPositionOn && problemPosition.key === currentProblemKey
       ? { dx: problemPosition.dx, dy: problemPosition.dy }
       : { dx: 0, dy: 0 };
+    const activeAbacusScale = currentSettings.displayMode === 'abacus' && abacusFit.key === currentProblemKey
+      ? abacusFit.scale
+      : 1;
     const activeDigitsColor = problemColor.key === currentProblemKey ? problemColor.color : theme.palette.primary.main;
 
     return (
@@ -1002,7 +1132,69 @@ const TrainerPage: React.FC = () => {
       }}>
         {state.showProblem ? (
           <Box ref={displayViewportRef}>
-            {currentSettings.displayMode === 'abacus' ? (
+            {isTwoScreens && (
+              <Stack
+                direction={{ xs: 'column', md: 'row' }}
+                spacing={3}
+                justifyContent="center"
+                alignItems="stretch"
+                sx={{ mb: 3 }}
+              >
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    minWidth: { xs: '100%', md: 320 },
+                    borderWidth: 2,
+                    borderColor: theme.palette.primary.main,
+                    background: `linear-gradient(180deg, ${theme.palette.primary.light}14 0%, transparent 100%)`,
+                  }}
+                >
+                  <Stack direction="row" justifyContent="center" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                    <Chip label="Экран A" size="small" color="primary" />
+                    <Typography variant="subtitle2" sx={{ textAlign: 'center' }}>Игрок A</Typography>
+                  </Stack>
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      textAlign: 'center',
+                      fontWeight: 'bold',
+                      color: theme.palette.primary.main,
+                      transform: `scale(${fontScale})`,
+                    }}
+                  >
+                    {expressionByStep(numbers, operation, state.currentProblem.ops)}
+                  </Typography>
+                </Paper>
+                <Paper
+                  variant="outlined"
+                  sx={{
+                    p: 2,
+                    minWidth: { xs: '100%', md: 320 },
+                    borderWidth: 2,
+                    borderColor: theme.palette.secondary.main,
+                    background: `linear-gradient(180deg, ${theme.palette.secondary.light}14 0%, transparent 100%)`,
+                  }}
+                >
+                  <Stack direction="row" justifyContent="center" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                    <Chip label="Экран B" size="small" color="secondary" />
+                    <Typography variant="subtitle2" sx={{ textAlign: 'center' }}>Игрок B</Typography>
+                  </Stack>
+                  <Typography
+                    variant="h4"
+                    sx={{
+                      textAlign: 'center',
+                      fontWeight: 'bold',
+                      color: theme.palette.secondary.main,
+                      transform: `scale(${fontScale})`,
+                    }}
+                  >
+                    {expressionByStep(numbersB.length ? numbersB : numbers, operationB, opsB.length ? opsB : undefined)}
+                  </Typography>
+                </Paper>
+              </Stack>
+            )}
+            {!isTwoScreens && (currentSettings.displayMode === 'abacus' ? (
               <Box sx={{ mb: 3 }}>
                 <Typography variant="h6" sx={{ mb: 2, textAlign: 'center' }}>
                   Запомните числа на абакусе:
@@ -1040,41 +1232,42 @@ const TrainerPage: React.FC = () => {
                   })()
                 ) : (
                   // обычный режим — все числа
-                  <Box
-                    ref={displayContentRef}
-                    sx={{
-                      display: 'inline-flex',
-                      flexWrap: 'wrap',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 2,
-                      width: 'fit-content',
-                      maxWidth: '1000px',
-                      mx: 'auto',
-                      transform: randomPositionOn ? `translate(${activeOffset.dx}px, ${activeOffset.dy}px)` : undefined,
-                      transformOrigin: 'center',
-                    }}
-                  >
-                    {numbers.map((number, index) => (
-                      <React.Fragment key={index}>
-                        <Box
-                          sx={{
-                            flex: '0 1 280px',
-                            minWidth: '200px',
-                          }}
-                        >
-                          <Typography variant="body1" sx={{ textAlign: 'center', mb: 1, fontWeight: 'bold' }}>Число {index + 1}</Typography>
-                          <TrainerAbacus value={number} showValue={false} />
-                        </Box>
-                        {index < numbers.length - 1 && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', px: 2 }}>
-                            <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: theme.palette.primary.main, textShadow: '2px 2px 4px rgba(0,0,0,0.3)', userSelect: 'none' }}>
-                              {state.currentProblem?.ops && state.currentProblem.ops[index] ? state.currentProblem.ops[index] : operation}
-                            </Typography>
+                  <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden' }}>
+                    <Box
+                      ref={displayContentRef}
+                      sx={{
+                        display: 'inline-flex',
+                        flexWrap: 'nowrap',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: { xs: 1, md: 1.5 },
+                        width: 'max-content',
+                        maxWidth: 'none',
+                        transform: `${randomPositionOn ? `translate(${activeOffset.dx}px, ${activeOffset.dy}px) ` : ''}scale(${activeAbacusScale})`,
+                        transformOrigin: 'top center',
+                      }}
+                    >
+                      {numbers.map((number, index) => (
+                        <React.Fragment key={index}>
+                          <Box
+                            sx={{
+                              flex: '0 1 280px',
+                              minWidth: '200px',
+                            }}
+                          >
+                            <Typography variant="body1" sx={{ textAlign: 'center', mb: 1, fontWeight: 'bold' }}>Число {index + 1}</Typography>
+                            <TrainerAbacus value={number} showValue={false} />
                           </Box>
-                        )}
-                      </React.Fragment>
-                    ))}
+                          {index < numbers.length - 1 && (
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '200px', px: 2 }}>
+                              <Typography variant="h1" sx={{ fontSize: { xs: '3rem', md: '4rem' }, fontWeight: 'bold', color: theme.palette.primary.main, textShadow: '2px 2px 4px rgba(0,0,0,0.3)', userSelect: 'none' }}>
+                                {state.currentProblem?.ops && state.currentProblem.ops[index] ? state.currentProblem.ops[index] : operation}
+                              </Typography>
+                            </Box>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </Box>
                   </Box>
                 ))}
                 <Typography variant="body1" sx={{ mt: 3, textAlign: 'center', fontWeight: 'bold', color: theme.palette.primary.main }}>
@@ -1086,7 +1279,6 @@ const TrainerPage: React.FC = () => {
             ) : (
               <Box sx={{ mb: 3 }}>
                 {(() => {
-                  const sequential = !!(currentSettings as any).sequentialDisplay;
                   const dynScale = Math.max(0.6, Math.min(1, 8 / Math.max(1, numbers.length)));
                   if (sequential) {
                     const idx = state.sequentialIndex || 0;
@@ -1155,7 +1347,7 @@ const TrainerPage: React.FC = () => {
                   );
                 })()}
               </Box>
-            )}
+            ))}
             
             <LinearProgress 
               variant="determinate" 
@@ -1335,23 +1527,101 @@ const TrainerPage: React.FC = () => {
           >
             Завершить
           </Button>
-          {problems.some(p => p.isCorrect === false) && (
+          {problems.some(p => p.isCorrect === false || ((currentSettings as any).twoScreens && (p as any).isCorrectB === false)) && (
             <Button
               variant="text"
               size="large"
               sx={{ ml: 2 }}
               onClick={() => {
-                const wrong = problems.filter(p => p.isCorrect === false);
+                const wrong = problems.filter(p => p.isCorrect === false || ((currentSettings as any).twoScreens && (p as any).isCorrectB === false));
+                const shouldRegenerateForRetry = !!(currentSettings as any).showAnswer;
+                const retryCount = Math.max(1, wrong.length);
+                const selectedOps = (currentSettings.operations || ['+']) as Operation[];
+                const retryFactory = generateProblemFactory({
+                  numbersCount: currentSettings.numbersCount,
+                  numberRange: currentSettings.numberRange,
+                  numberRangeMin: (currentSettings as any).numberRangeMin ?? 1,
+                  operations: selectedOps,
+                  lawsMode: currentSettings.lawsMode as any,
+                  multiplyDigits1: (currentSettings as any).multiplyDigits1,
+                  multiplyDigits2: (currentSettings as any).multiplyDigits2,
+                  multiplyDigits3: (currentSettings as any).multiplyDigits3,
+                  divisionDividendDigits: (currentSettings as any).divisionDividendDigits,
+                  divisionDivisorDigits: (currentSettings as any).divisionDivisorDigits,
+                  divisionSecondDivisorDigits: (currentSettings as any).divisionSecondDivisorDigits,
+                });
+                const twoScreensMode = !!(currentSettings as any).twoScreens;
+                const seen = new Set<string>(wrong.map(p => getExpressionText({ numbers: p.numbers, operation: p.operation, ops: p.ops })));
+                const seenB = new Set<string>(
+                  wrong
+                    .map(p => ((p as any).numbersB && (p as any).operationB
+                      ? getExpressionText({
+                          numbers: (p as any).numbersB,
+                          operation: (p as any).operationB,
+                          ops: (p as any).opsB,
+                        } as any)
+                      : null))
+                    .filter(Boolean) as string[]
+                );
+                const regenerated: Problem[] = [];
+                if (shouldRegenerateForRetry) {
+                  for (let i = 0; i < retryCount; i++) {
+                    let a = retryFactory() as Problem;
+                    let triesA = 0;
+                    while (triesA < 20 && seen.has(getExpressionText({ numbers: a.numbers, operation: a.operation, ops: a.ops }))) {
+                      a = retryFactory() as Problem;
+                      triesA += 1;
+                    }
+                    seen.add(getExpressionText({ numbers: a.numbers, operation: a.operation, ops: a.ops }));
+
+                    if (!twoScreensMode) {
+                      regenerated.push(a);
+                      continue;
+                    }
+
+                    let b = retryFactory() as Problem;
+                    let triesB = 0;
+                    const exprA = getExpressionText({ numbers: a.numbers, operation: a.operation, ops: a.ops });
+                    while (
+                      triesB < 20 &&
+                      (
+                        getExpressionText({ numbers: b.numbers, operation: b.operation, ops: b.ops }) === exprA ||
+                        seenB.has(getExpressionText({ numbers: b.numbers, operation: b.operation, ops: b.ops }))
+                      )
+                    ) {
+                      b = retryFactory() as Problem;
+                      triesB += 1;
+                    }
+                    seenB.add(getExpressionText({ numbers: b.numbers, operation: b.operation, ops: b.ops }));
+
+                    regenerated.push({
+                      ...a,
+                      numbersB: b.numbers,
+                      operationB: b.operation,
+                      correctAnswerB: b.correctAnswer,
+                      opsB: b.ops,
+                    });
+                  }
+                }
+
                 // Важно: сохраняем ops (последовательность + / -), иначе при повторе
                 // примеры со смешанными операциями отображаются как простая сумма
                 // и пользователь видит другую задачу, чем правильный ответ.
                 const session: TrainingSession = {
-                  problems: wrong.map(p => ({
-                    numbers: p.numbers,
-                    operation: p.operation,
-                    correctAnswer: p.correctAnswer,
-                    ...(p as any).ops ? { ops: (p as any).ops } : {},
-                  }) as any),
+                  problems: (
+                    shouldRegenerateForRetry
+                      ? regenerated
+                      : wrong.map(p => ({
+                          numbers: p.numbers,
+                          operation: p.operation,
+                          correctAnswer: p.correctAnswer,
+                          ...(p as any).numbersB ? { numbersB: (p as any).numbersB } : {},
+                          ...(p as any).operationB ? { operationB: (p as any).operationB } : {},
+                          ...(p as any).correctAnswerB !== undefined ? { correctAnswerB: (p as any).correctAnswerB } : {},
+                          ...(p as any).ops ? { ops: (p as any).ops } : {},
+                          ...(p as any).opsB ? { opsB: (p as any).opsB } : {},
+                        }) as any)
+                  ),
                   currentProblemIndex: 0,
                   startTime: Date.now(),
                   accuracy: 0,
@@ -1370,6 +1640,8 @@ const TrainerPage: React.FC = () => {
                   timeLeft: currentSettings.displaySpeed,
                   sequentialIndex: 0,
                   userAnswer: '',
+                  // @ts-ignore
+                  userAnswerB: '',
                 }));
               }}
             >
@@ -2026,9 +2298,20 @@ const TrainerPage: React.FC = () => {
                   renderResults()
                 ) : state.currentStep === 'result_pause' ? (
                   <Box sx={{ textAlign: 'center', py: 6 }}>
-                    <Typography variant="h4" sx={{ mb: 2, color: theme.palette.info.main }}>
-                      Правильный ответ: {state.currentProblem?.correctAnswer}
-                    </Typography>
+                    {(currentSettings as any).twoScreens ? (
+                      <Stack spacing={1} sx={{ mb: 2 }} alignItems="center">
+                        <Typography variant="h5" sx={{ color: theme.palette.info.main }}>
+                          Игрок A: правильный ответ {state.currentProblem?.correctAnswer}
+                        </Typography>
+                        <Typography variant="h5" sx={{ color: theme.palette.info.main }}>
+                          Игрок B: правильный ответ {((state.currentProblem as any)?.correctAnswerB ?? state.currentProblem?.correctAnswer)}
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <Typography variant="h4" sx={{ mb: 2, color: theme.palette.info.main }}>
+                        Правильный ответ: {state.currentProblem?.correctAnswer}
+                      </Typography>
+                    )}
                     {(currentSettings as any).twoScreens && (
                       <Stack direction="row" spacing={2} justifyContent="center">
                         <Chip label={`A: ${state.currentProblem?.userAnswer} ${state.currentProblem?.isCorrect ? '✅' : '❌'}`} color={state.currentProblem?.isCorrect ? 'success' : 'error'} />

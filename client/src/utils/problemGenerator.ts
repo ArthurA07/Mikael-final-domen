@@ -268,10 +268,16 @@ export function generateProblemFactory(settings: GeneratorSettings) {
   const MAX_MUL_VALUE = Math.pow(10, MAX_MUL_DIGITS) - 1; // 999
   const MAX_DIVIDEND_VALUE = Math.pow(10, MAX_DIVIDEND_DIGITS) - 1; // 999999
   const MAX_DIVISOR_VALUE = Math.pow(10, MAX_DIVISOR_DIGITS) - 1; // 9999
-  const STANDARD_RECENT_CACHE_LIMIT = 80;
-  const STANDARD_ANTI_REPEAT_MAX_RETRIES = 30;
-  const recentStandardExpressions: string[] = [];
-  let antiRepeatDepth = 0;
+  const STANDARD_VARIETY_HISTORY_LIMIT = 30;
+  const STANDARD_CANDIDATE_POOL_SIZE = 8;
+  const recentStandardHistory: Array<{
+    expression: string;
+    structure: string;
+    opsPattern: string;
+    positionOperands: string[];
+    placeProfile: string;
+  }> = [];
+  let isStandardSampling = false;
   let generateImpl: null | (() => Problem) = null;
 
   function makeWithUnits(max: number, units: number, min = 1): number {
@@ -911,25 +917,126 @@ export function generateProblemFactory(settings: GeneratorSettings) {
     return expr;
   }
 
-  function rememberStandardExpression(expr: string) {
-    recentStandardExpressions.push(expr);
-    if (recentStandardExpressions.length > STANDARD_RECENT_CACHE_LIMIT) {
-      recentStandardExpressions.splice(0, recentStandardExpressions.length - STANDARD_RECENT_CACHE_LIMIT);
+  function getOpsSequence(problem: Problem): Operation[] {
+    return problem.ops && problem.ops.length === problem.numbers.length - 1
+      ? problem.ops
+      : Array.from({ length: Math.max(0, problem.numbers.length - 1) }, () => problem.operation);
+  }
+
+  function classifyOperandStructure(value: number): string {
+    const abs = Math.abs(Math.trunc(value));
+    if (abs <= 9) return 'unitsOnly';
+    if (abs >= 1000 && abs % 1000 === 0) return 'round1000plus';
+    if (abs >= 100 && abs % 100 === 0) return 'round100';
+    if (abs >= 10 && abs % 10 === 0) return 'round10';
+    return 'mixed';
+  }
+
+  function activePlaces(value: number): number[] {
+    const abs = Math.abs(Math.trunc(value));
+    if (abs === 0) return [1];
+    const places: number[] = [];
+    let place = 1;
+    let n = abs;
+    while (n > 0) {
+      if (n % 10 !== 0) places.push(place);
+      n = Math.floor(n / 10);
+      place *= 10;
+    }
+    return places;
+  }
+
+  function buildStandardCandidateMeta(problem: Problem) {
+    const opsSeq = getOpsSequence(problem);
+    const positionOperands = problem.numbers.slice(1).map((n, idx) => `${opsSeq[idx]}${n}`);
+    const operandClasses = problem.numbers.slice(1).map(classifyOperandStructure);
+    const placeProfile = problem.numbers
+      .slice(1)
+      .map((n, idx) => `${opsSeq[idx]}:${activePlaces(n).join('.')}`)
+      .join('|');
+    const opsPattern = opsSeq.join('');
+    const firstDigits = Math.max(1, Math.floor(Math.log10(Math.max(1, Math.abs(problem.numbers[0])))) + 1);
+    const structure = `first:${firstDigits}digit|ops:${opsPattern}|classes:${operandClasses.join(',')}|places:${placeProfile}`;
+    return { structure, opsPattern, positionOperands, placeProfile };
+  }
+
+  function scoreStandardCandidate(problem: Problem): number {
+    const expr = toExpression(problem.numbers, problem.operation, problem.ops);
+    const meta = buildStandardCandidateMeta(problem);
+    let score = 100;
+    const last = recentStandardHistory[recentStandardHistory.length - 1];
+
+    if (last) {
+      if (expr === last.expression) score -= 1000;
+      if (meta.structure === last.structure) score -= 140;
+      if (meta.placeProfile === last.placeProfile) score -= 55;
+      if (meta.opsPattern === last.opsPattern) score -= 12;
+      const samePositionOperands = meta.positionOperands.reduce((acc, operand, idx) => (
+        operand === last.positionOperands[idx] ? acc + 1 : acc
+      ), 0);
+      score -= samePositionOperands * 30;
+    }
+
+    const sameExprCount = recentStandardHistory.filter(h => h.expression === expr).length;
+    const sameStructureCount = recentStandardHistory.filter(h => h.structure === meta.structure).length;
+    const samePlaceProfileCount = recentStandardHistory.filter(h => h.placeProfile === meta.placeProfile).length;
+    score -= sameExprCount * 400;
+    score -= sameStructureCount * 18;
+    score -= samePlaceProfileCount * 12;
+
+    let recentStructureRun = 0;
+    for (let i = recentStandardHistory.length - 1; i >= 0; i--) {
+      if (recentStandardHistory[i].structure !== meta.structure) break;
+      recentStructureRun += 1;
+    }
+    score -= recentStructureRun * 35;
+
+    // Небольшие бонусы за смену "рисунка" задачи.
+    const structureSeen = sameStructureCount > 0;
+    const placeSeen = samePlaceProfileCount > 0;
+    if (!structureSeen) score += 16;
+    if (!placeSeen) score += 10;
+
+    return score;
+  }
+
+  function rememberStandardProblem(problem: Problem) {
+    const expr = toExpression(problem.numbers, problem.operation, problem.ops);
+    const meta = buildStandardCandidateMeta(problem);
+    recentStandardHistory.push({
+      expression: expr,
+      structure: meta.structure,
+      opsPattern: meta.opsPattern,
+      positionOperands: meta.positionOperands,
+      placeProfile: meta.placeProfile,
+    });
+    if (recentStandardHistory.length > STANDARD_VARIETY_HISTORY_LIMIT) {
+      recentStandardHistory.splice(0, recentStandardHistory.length - STANDARD_VARIETY_HISTORY_LIMIT);
     }
   }
 
   function finalizeProblem(problem: Problem): Problem {
     if (cfg.lawsMode !== 'none') return problem;
-    const expr = toExpression(problem.numbers, problem.operation, problem.ops);
-    const isRecentRepeat = recentStandardExpressions.includes(expr);
-    if (isRecentRepeat && antiRepeatDepth < STANDARD_ANTI_REPEAT_MAX_RETRIES && generateImpl) {
-      antiRepeatDepth += 1;
-      const regenerated = generateImpl();
-      antiRepeatDepth -= 1;
-      return regenerated;
+
+    // В режиме выборки кандидатов отдаём "сырой" результат без рекурсивного разнообразия.
+    if (isStandardSampling || !generateImpl) return problem;
+
+    const candidates: Problem[] = [problem];
+    isStandardSampling = true;
+    try {
+      for (let i = 1; i < STANDARD_CANDIDATE_POOL_SIZE; i++) {
+        candidates.push(generateImpl());
+      }
+    } finally {
+      isStandardSampling = false;
     }
-    rememberStandardExpression(expr);
-    return problem;
+
+    const scored = candidates.map((candidate) => ({ candidate, score: scoreStandardCandidate(candidate) }));
+    const bestScore = Math.max(...scored.map(s => s.score));
+    const topBand = scored.filter(s => s.score >= bestScore - 8);
+    const picked = pickRandom(topBand).candidate;
+    rememberStandardProblem(picked);
+    return picked;
   }
 
   return function generate(): Problem {
@@ -1036,7 +1143,7 @@ export function generateProblemFactory(settings: GeneratorSettings) {
               const low = Math.max(minValue, Math.floor(hi * 0.2));
               const candidates: number[] = [];
               for (let v = low; v <= hi; v++) candidates.push(v);
-              const filtered = prevPick !== null && candidates.length > 1
+              const filtered: number[] = prevPick !== null && candidates.length > 1
                 ? candidates.filter(v => v !== prevPick)
                 : candidates;
               const n = pickRandom(filtered.length ? filtered : candidates);
@@ -1109,7 +1216,7 @@ export function generateProblemFactory(settings: GeneratorSettings) {
       }
     }
 
-    let correctAnswer: number;
+    let correctAnswer = 0;
     switch (operation) {
       case '+':
         if (opsSequence && opsSequence.length === numbers.length - 1) {
@@ -1231,22 +1338,13 @@ export function generateProblemFactory(settings: GeneratorSettings) {
               divisionBuilt = true;
               break;
             }
-            if (configuredCountDivs >= 2) {
-              const reduced = tryBuildDivision(1);
-              if (reduced) {
-                numbers.splice(0, numbers.length, ...reduced.numbers);
-                correctAnswer = reduced.correctAnswer;
-                divisionBuilt = true;
-                break;
-              }
-            }
           }
 
           if (divisionBuilt) break;
 
           // Разнообразный fallback: строим набор валидных кандидатов вместо фиксированного divisor=2.
           const candidates: Array<{ numbers: number[]; correctAnswer: number; weight: number }> = [];
-          for (const countDivs of configuredCountDivs >= 2 ? [2, 1] : [1]) {
+          for (const countDivs of [configuredCountDivs]) {
             const maxSmallDivisor = Math.min(12, Math.max(2, maxValue));
             for (let d1 = 2; d1 <= maxSmallDivisor; d1++) {
               const d2Values = countDivs >= 2 ? Array.from({ length: maxSmallDivisor - 1 }, (_, idx) => idx + 2) : [1];
@@ -1291,10 +1389,19 @@ export function generateProblemFactory(settings: GeneratorSettings) {
           }
 
           // Последний защитный fallback на случай экстремальных ограничений.
-          const d1 = Math.min(9, Math.max(2, maxDividend));
-          const q = Math.max(1, Math.floor(maxDividend / Math.max(2, d1)));
-          numbers.splice(0, numbers.length, Math.max(1, d1 * q), Math.max(2, d1));
-          correctAnswer = q;
+          if (configuredCountDivs >= 2) {
+            const d1 = 2;
+            const d2 = 2;
+            const base = d1 * d2;
+            const q = Math.max(1, Math.floor(maxDividend / base));
+            numbers.splice(0, numbers.length, Math.max(1, base * q), d1, d2);
+            correctAnswer = q;
+          } else {
+            const d1 = Math.min(9, Math.max(2, maxDividend));
+            const q = Math.max(1, Math.floor(maxDividend / Math.max(2, d1)));
+            numbers.splice(0, numbers.length, Math.max(1, d1 * q), Math.max(2, d1));
+            correctAnswer = q;
+          }
           break;
         }
       default:
