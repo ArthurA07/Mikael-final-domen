@@ -249,14 +249,29 @@ const Navbar: React.FC = () => {
           borderBottom: '1px solid rgba(0,0,0,0.05)',
         }}
       >
-        <Toolbar sx={{ py: 1, gap: 1 }}>
+        <Toolbar
+          sx={
+            isMobile
+              ? { py: 1, gap: 1, minHeight: 72 }
+              : {
+                  py: 1.25,
+                  minHeight: 84,
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)',
+                  alignItems: 'center',
+                  columnGap: 2,
+                }
+          }
+        >
           {/* Logo и название */}
           <Box 
             sx={{ 
               display: 'flex', 
               alignItems: 'center', 
-              flex: '1 1 auto',
+              flex: isMobile ? '1 1 auto' : undefined,
               minWidth: 0,
+              maxWidth: isMobile ? 'none' : '100%',
+              justifySelf: isMobile ? 'auto' : 'start',
               cursor: 'pointer',
               transition: 'transform 0.3s ease',
               '&:hover': {
@@ -303,7 +318,7 @@ const Navbar: React.FC = () => {
 
           {/* Десктопное меню */}
           {!isMobile && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, overflow: 'hidden' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, justifySelf: 'center' }}>
               {menuItems
                 .filter(item => item.public || isAuthenticated)
                 .slice(0, 4) // Показываем только первые 4 пункта
@@ -317,7 +332,9 @@ const Navbar: React.FC = () => {
                       backgroundColor: location.pathname === item.path ? 'rgba(255, 107, 107, 0.1)' : 'transparent',
                       borderRadius: '20px',
                       px: 3,
-                      py: 1,
+                      py: 1.15,
+                      minHeight: 42,
+                      lineHeight: 1.2,
                       fontSize: '0.95rem',
                       textTransform: 'none',
                       transition: 'all 0.3s ease',
@@ -334,7 +351,17 @@ const Navbar: React.FC = () => {
           )}
 
           {/* Правая часть */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              flexShrink: 0,
+              justifySelf: isMobile ? 'auto' : 'end',
+              justifyContent: 'flex-end',
+              minWidth: isMobile ? 0 : 220,
+            }}
+          >
             {!isMobile && (
               <>
                 {isAuthenticated ? (
