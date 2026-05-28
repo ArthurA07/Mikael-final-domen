@@ -1108,6 +1108,90 @@ const TrainerPage: React.FC = () => {
       const opFromSeq = opsSeq?.[idx - 1];
       return `${opFromSeq || op} ${num ?? ''}`;
     };
+    const renderAbacusByStep = (vals: number[], op: Operation, opsSeq: Operation[] | undefined, paletteColor: string) => {
+      const count = Math.max(1, vals.length);
+      const fitScale = Math.max(0.62, Math.min(1, (isMobile ? 1.55 : 2.25) / count));
+      if ((currentSettings as any).sequentialDisplay) {
+        const idx = state.sequentialIndex || 0;
+        const number = vals[idx];
+        return (
+          <Box
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 1.5,
+              width: 'fit-content',
+              maxWidth: '100%',
+            }}
+          >
+            {idx === 0 ? null : (
+              <Typography
+                variant="h2"
+                sx={{
+                  fontSize: { xs: '2rem', md: '2.5rem' },
+                  fontWeight: 'bold',
+                  color: paletteColor,
+                  userSelect: 'none',
+                }}
+              >
+                {opsSeq && opsSeq[idx - 1] ? opsSeq[idx - 1] : op}
+              </Typography>
+            )}
+            <Box sx={{ flex: '0 1 240px', minWidth: '180px' }}>
+              <Typography variant="body2" sx={{ textAlign: 'center', mb: 1, fontWeight: 'bold' }}>
+                Число {idx + 1}
+              </Typography>
+              <TrainerAbacus value={number ?? 0} showValue={false} />
+            </Box>
+          </Box>
+        );
+      }
+
+      return (
+        <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', overflow: 'hidden' }}>
+          <Box
+            sx={{
+              display: 'inline-flex',
+              flexWrap: 'nowrap',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 1,
+              width: 'max-content',
+              maxWidth: 'none',
+              transform: `scale(${fitScale})`,
+              transformOrigin: 'top center',
+            }}
+          >
+            {vals.map((number, index) => (
+              <React.Fragment key={index}>
+                <Box sx={{ flex: '0 0 auto', minWidth: '170px' }}>
+                  <Typography variant="body2" sx={{ textAlign: 'center', mb: 1, fontWeight: 'bold' }}>
+                    Число {index + 1}
+                  </Typography>
+                  <TrainerAbacus value={number} showValue={false} />
+                </Box>
+                {index < vals.length - 1 && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '180px', px: 1, flex: '0 0 auto' }}>
+                    <Typography
+                      variant="h2"
+                      sx={{
+                        fontSize: { xs: '2rem', md: '2.5rem' },
+                        fontWeight: 'bold',
+                        color: paletteColor,
+                        userSelect: 'none',
+                      }}
+                    >
+                      {opsSeq && opsSeq[index] ? opsSeq[index] : op}
+                    </Typography>
+                  </Box>
+                )}
+              </React.Fragment>
+            ))}
+          </Box>
+        </Box>
+      );
+    };
 
     // Визуальные "рандомизации" (позиция/цвет).
     // Позиция фиксируется на весь текущий пример и меняется только на новом примере.
@@ -1144,7 +1228,8 @@ const TrainerPage: React.FC = () => {
                   variant="outlined"
                   sx={{
                     p: 2,
-                    minWidth: { xs: '100%', md: 320 },
+                    minWidth: { xs: '100%', md: 420 },
+                    flex: 1,
                     borderWidth: 2,
                     borderColor: theme.palette.primary.main,
                     background: `linear-gradient(180deg, ${theme.palette.primary.light}14 0%, transparent 100%)`,
@@ -1154,23 +1239,28 @@ const TrainerPage: React.FC = () => {
                     <Chip label="Экран A" size="small" color="primary" />
                     <Typography variant="subtitle2" sx={{ textAlign: 'center' }}>Игрок A</Typography>
                   </Stack>
-                  <Typography
-                    variant="h4"
-                    sx={{
-                      textAlign: 'center',
-                      fontWeight: 'bold',
-                      color: theme.palette.primary.main,
-                      transform: `scale(${fontScale})`,
-                    }}
-                  >
-                    {expressionByStep(numbers, operation, state.currentProblem.ops)}
-                  </Typography>
+                  {currentSettings.displayMode === 'abacus' ? (
+                    renderAbacusByStep(numbers, operation, state.currentProblem.ops, theme.palette.primary.main)
+                  ) : (
+                    <Typography
+                      variant="h4"
+                      sx={{
+                        textAlign: 'center',
+                        fontWeight: 'bold',
+                        color: theme.palette.primary.main,
+                        transform: `scale(${fontScale})`,
+                      }}
+                    >
+                      {expressionByStep(numbers, operation, state.currentProblem.ops)}
+                    </Typography>
+                  )}
                 </Paper>
                 <Paper
                   variant="outlined"
                   sx={{
                     p: 2,
-                    minWidth: { xs: '100%', md: 320 },
+                    minWidth: { xs: '100%', md: 420 },
+                    flex: 1,
                     borderWidth: 2,
                     borderColor: theme.palette.secondary.main,
                     background: `linear-gradient(180deg, ${theme.palette.secondary.light}14 0%, transparent 100%)`,
@@ -1180,17 +1270,26 @@ const TrainerPage: React.FC = () => {
                     <Chip label="Экран B" size="small" color="secondary" />
                     <Typography variant="subtitle2" sx={{ textAlign: 'center' }}>Игрок B</Typography>
                   </Stack>
-                  <Typography
-                    variant="h4"
-                    sx={{
-                      textAlign: 'center',
-                      fontWeight: 'bold',
-                      color: theme.palette.secondary.main,
-                      transform: `scale(${fontScale})`,
-                    }}
-                  >
-                    {expressionByStep(numbersB.length ? numbersB : numbers, operationB, opsB.length ? opsB : undefined)}
-                  </Typography>
+                  {currentSettings.displayMode === 'abacus' ? (
+                    renderAbacusByStep(
+                      numbersB.length ? numbersB : numbers,
+                      operationB,
+                      opsB.length ? opsB : undefined,
+                      theme.palette.secondary.main
+                    )
+                  ) : (
+                    <Typography
+                      variant="h4"
+                      sx={{
+                        textAlign: 'center',
+                        fontWeight: 'bold',
+                        color: theme.palette.secondary.main,
+                        transform: `scale(${fontScale})`,
+                      }}
+                    >
+                      {expressionByStep(numbersB.length ? numbersB : numbers, operationB, opsB.length ? opsB : undefined)}
+                    </Typography>
+                  )}
                 </Paper>
               </Stack>
             )}
